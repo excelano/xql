@@ -73,7 +73,7 @@ func ValidatePredicate(p parse.Predicate, schema map[string]cell.ColumnInfo) err
 	case *parse.NotOp:
 		return ValidatePredicate(n.Inner, schema)
 	case *parse.Comparison:
-		return validateExpr(n.LExpr, schema)
+		return ValidateExpr(n.LExpr, schema)
 	case *parse.NullTest:
 		if _, ok := schema[n.Column]; !ok {
 			return fmt.Errorf("unknown column %q", n.Column)

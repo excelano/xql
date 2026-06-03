@@ -105,21 +105,9 @@ func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "  xql sp  --help")
 }
 
-// --- backend stubs (real implementations land in slices 4 and v1.1) ---
-
-func runCSV(args []string) int {
-	if len(args) > 0 {
-		switch args[0] {
-		case "-h", "--help":
-			fmt.Println("xql csv [flags] <csv-file>")
-			fmt.Println()
-			fmt.Println("CSV backend — not yet wired in this slice.")
-			return 0
-		}
-	}
-	fmt.Fprintln(os.Stderr, "xql csv: backend not yet implemented (slice 1 scaffold).")
-	return 1
-}
+// runCSV delegates to runCSVImpl in csv.go. Kept as a thin shim so the
+// Backend table's function value stays a stable identifier.
+func runCSV(args []string) int { return runCSVImpl(args) }
 
 func runSP(args []string) int {
 	if len(args) > 0 {

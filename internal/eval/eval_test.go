@@ -225,7 +225,7 @@ func TestMatchesArithmeticNullExcludes(t *testing.T) {
 
 func TestValidatePredicateArithmetic(t *testing.T) {
 	tbl := numericFixture()
-	// Unknown column inside an arithmetic LHS surfaces from validateExpr.
+	// Unknown column inside an arithmetic LHS surfaces from ValidateExpr.
 	pred := cmpE(binE("*", colE("Price"), colE("Nope")), ">", vnum("0"))
 	err := ValidatePredicate(pred, tbl.Schema)
 	if err == nil {
