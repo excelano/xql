@@ -4,11 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/excelano/xql/internal/cell"
 	csvbackend "github.com/excelano/xql/internal/csv"
 	"github.com/excelano/xql/internal/parse"
+	"github.com/excelano/xql/internal/repl"
 )
 
 // runCSVImpl is the CSV-backend entry point. The dispatcher hands us argv
@@ -102,9 +104,33 @@ func runCSVImpl(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "Connected to: %s (%d columns, %d rows)\n", t.Path, len(t.Columns), len(t.Rows))
-	fmt.Fprintln(os.Stderr, "REPL is not wired in this slice. Use --exec=\"SELECT ...\" for now.")
+	session := &repl.Session{
+		Out:         os.Stdout,
+		Stderr:      os.Stderr,
+		Prompt:      "xql csv> ",
+		HistoryPath: filepath.Join(configDir(), "history-csv"),
+		Banner: fmt.Sprintf(
+			"Connected to: %s (%d columns, %d rows). Type \"help\" for commands, \"quit\" to exit.",
+			t.Path, len(t.Columns), len(t.Rows),
+		),
+		Execute:    exec.Execute,
+		Describe:   exec.Describe,
+		Refresh:    exec.Refresh,
+		SetConfirm: exec.SetConfirm,
+	}
+	if err := repl.Run(session); err != nil {
+		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)
+		return 1
+	}
 	return 0
+}
+
+// configDir returns ~/.config/xql, where REPL history lives. One directory
+// shared across backends; history files distinguish by suffix (history-csv,
+// history-sp).
+func configDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "xql")
 }
 
 // reorderArgs moves positional arguments to the end so flag.FlagSet (which
