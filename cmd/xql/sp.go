@@ -7,25 +7,29 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/excelano/xql/internal/parse"
 	"github.com/excelano/xql/internal/sp"
 )
 
 // runSPImpl is the SharePoint-backend entry point. The dispatcher hands us
 // argv stripped of "xql sp" — so args[0] is the first user-supplied token.
 //
-// Slice 1 scope: --list URL only. Authenticate via device code, resolve the
-// list, print connected status. Query execution (--exec, --commit, ...) lands
-// in slices 2-3.
+// Slice 1 wired --list. Slice 2 adds --exec / --format / --all-fields for
+// one-shot SELECT queries. Writes (--commit, --confirm-destructive) and the
+// REPL land in slices 3 and 4.
 func runSPImpl(args []string) int {
 	fs := flag.NewFlagSet("xql sp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagList = fs.String("list", "", "SharePoint list URL (required)")
+		flagList      = fs.String("list", "", "SharePoint list URL (required)")
+		flagExec      = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagFormat    = fs.String("format", "", "Output format: table | tsv | json (auto-detected if blank)")
+		flagAllFields = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: xql sp --list <list-url>")
+		fmt.Fprintln(os.Stderr, "Usage: xql sp --list <list-url> [--exec STATEMENT] [flags]")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
 		fs.PrintDefaults()
@@ -71,7 +75,34 @@ func runSPImpl(args []string) int {
 		return 1
 	}
 
+	exec := &sp.Executor{
+		Graph:     graph,
+		Bound:     bound,
+		Format:    *flagFormat,
+		AllFields: *flagAllFields,
+		Out:       os.Stdout,
+	}
+
+	if *flagExec != "" {
+		cleaned, bangCommit := parse.PreProcess(*flagExec)
+		if bangCommit {
+			fmt.Fprintln(os.Stderr, "Error: trailing '!' is not supported in --exec mode; use --commit")
+			return 2
+		}
+		stmt, err := parse.Parse(cleaned)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+			return 1
+		}
+		if err := exec.Execute(ctx, stmt, false); err != nil {
+			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	fmt.Fprintf(os.Stderr, "Authenticated as: %s\n", result.Account.PreferredUsername)
 	fmt.Fprintf(os.Stderr, "Connected to: %s (%d columns)\n", bound.DisplayName, len(bound.Columns))
+	fmt.Fprintln(os.Stderr, "(REPL lands in slice 4; for now use --exec \"SELECT ...\" for one-shot queries)")
 	return 0
 }
