@@ -79,6 +79,13 @@ func runCSVImpl(args []string) int {
 		return 1
 	}
 
+	if *flagOutput != "" {
+		if err := repl.TruncateOutputFile(*flagOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+	}
+
 	exec := &csvbackend.Executor{
 		Table:              t,
 		Mode:               *flagMode,
@@ -115,10 +122,13 @@ func runCSVImpl(args []string) int {
 			"Connected to: %s (%d columns, %d rows). Type \"help\" for commands, \"quit\" to exit.",
 			t.Path, len(t.Columns), len(t.Rows),
 		),
-		Execute:    exec.Execute,
-		Describe:   exec.Describe,
-		Refresh:    exec.Refresh,
-		SetConfirm: exec.SetConfirm,
+		Execute:       exec.Execute,
+		Describe:      exec.Describe,
+		Refresh:       exec.Refresh,
+		SetConfirm:    exec.SetConfirm,
+		SetMode:       func(m string) { exec.Mode = m },
+		SetHeaders:    func(on bool) { exec.Headers = on },
+		SetOutputPath: func(p string) { exec.OutputPath = p },
 	}
 	if err := repl.Run(session); err != nil {
 		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)

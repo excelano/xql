@@ -51,9 +51,13 @@ func (e *Executor) renderSelect(r render.Result) error {
 	if e.OutputPath == "" {
 		return render.Render(e.Out, r, e.Mode, e.Headers)
 	}
-	f, err := os.Create(e.OutputPath)
+	// Append so sticky `output 'FILE'` in the REPL accumulates results
+	// across multiple SELECTs. Truncation is the responsibility of the
+	// caller setting OutputPath: cmd/xql does it once for --output, the
+	// REPL does it once per `output`/`once` command.
+	f, err := os.OpenFile(e.OutputPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
-		return fmt.Errorf("create --output file: %w", err)
+		return fmt.Errorf("open --output file: %w", err)
 	}
 	defer f.Close()
 	if err := render.Render(f, r, render.FormatCSV, e.Headers); err != nil {

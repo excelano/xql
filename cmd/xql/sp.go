@@ -81,6 +81,13 @@ func runSPImpl(args []string) int {
 		return 1
 	}
 
+	if *flagOutput != "" {
+		if err := repl.TruncateOutputFile(*flagOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+	}
+
 	exec := &sp.Executor{
 		Graph:              graph,
 		Bound:              bound,
@@ -124,9 +131,12 @@ func runSPImpl(args []string) int {
 		Execute: func(stmt parse.Stmt, commit bool) error {
 			return exec.Execute(ctx, stmt, commit)
 		},
-		Describe:   exec.Describe,
-		Refresh:    exec.Refresh,
-		SetConfirm: exec.SetConfirm,
+		Describe:      exec.Describe,
+		Refresh:       exec.Refresh,
+		SetConfirm:    exec.SetConfirm,
+		SetMode:       func(m string) { exec.Mode = m },
+		SetHeaders:    func(on bool) { exec.Headers = on },
+		SetOutputPath: func(p string) { exec.OutputPath = p },
 	}
 	if err := repl.Run(session); err != nil {
 		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)

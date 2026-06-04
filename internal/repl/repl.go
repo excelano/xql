@@ -18,10 +18,10 @@ import (
 )
 
 // Session bundles everything the REPL needs from its host backend. Out and
-// Stderr separate user-facing data from diagnostics so --format=json (etc.)
+// Stderr separate user-facing data from diagnostics so --mode=json (etc.)
 // can pipe cleanly to a downstream tool. Execute / Describe / Refresh are
-// required; SetConfirm is optional (writes will fall through with no prompt
-// when nil, which matches the no-prompt behavior in --exec mode).
+// required; the Set* callbacks are optional — a backend that omits one will
+// reject the corresponding meta-command at runtime.
 type Session struct {
 	Out         io.Writer
 	Stderr      io.Writer
@@ -33,6 +33,13 @@ type Session struct {
 	Describe   func(w io.Writer) error
 	Refresh    func() error
 	SetConfirm func(fn func() bool)
+
+	// SetMode, SetHeaders, SetOutputPath bridge the REPL meta-commands
+	// `mode`, `headers`, `once`, and `output` to the host executor's state.
+	// A nil setter means the backend does not support that knob.
+	SetMode       func(mode string)
+	SetHeaders    func(on bool)
+	SetOutputPath func(path string)
 }
 
 // Run drives the prompt loop until ^D, "quit", or an unrecoverable read
@@ -60,6 +67,11 @@ func Run(s *Session) error {
 		fmt.Fprintln(s.Stderr, s.Banner)
 	}
 
+	// onceArmed tracks whether the next SQL statement should reset
+	// OutputPath after running. `once 'file'` arms it; `output ...` or a
+	// completed SQL execution disarms it.
+	onceArmed := false
+
 	for {
 		input, err := line.Prompt(s.Prompt)
 		if errors.Is(err, io.EOF) {
@@ -79,20 +91,13 @@ func Run(s *Session) error {
 		}
 		line.AppendHistory(trimmed)
 
-		switch classifyMeta(trimmed) {
-		case metaCmdQuit:
-			return nil
-		case metaCmdHelp:
-			printHelp(s.Out)
-			continue
-		case metaCmdDescribe:
-			if err := s.Describe(s.Out); err != nil {
-				fmt.Fprintf(s.Stderr, "Error: %v\n", err)
+		if m := parseMeta(trimmed); m != nil {
+			quit, mErr := dispatchMeta(s, m, &onceArmed)
+			if mErr != nil {
+				fmt.Fprintf(s.Stderr, "Error: %v\n", mErr)
 			}
-			continue
-		case metaCmdRefresh:
-			if err := s.Refresh(); err != nil {
-				fmt.Fprintf(s.Stderr, "Error: %v\n", err)
+			if quit {
+				return nil
 			}
 			continue
 		}
@@ -108,6 +113,12 @@ func Run(s *Session) error {
 		}
 		if err := s.Execute(stmt, commit); err != nil {
 			fmt.Fprintf(s.Stderr, "Error: %v\n", err)
+		}
+		// Disarm `once` after the SQL statement runs (success or fail) so
+		// subsequent statements return to the prior output target.
+		if onceArmed && s.SetOutputPath != nil {
+			s.SetOutputPath("")
+			onceArmed = false
 		}
 	}
 }
@@ -139,33 +150,157 @@ func saveHistory(line *liner.State, path string) {
 	_, _ = line.WriteHistory(f)
 }
 
-type metaCmd int
+// metaCmd is a parsed REPL meta-command. The set of recognized names is
+// fixed; arg holds the rest of the line, with surrounding quotes stripped
+// when present.
+type metaCmd struct {
+	name string
+	arg  string
+}
 
-const (
-	metaCmdNone metaCmd = iota
-	metaCmdQuit
-	metaCmdHelp
-	metaCmdDescribe
-	metaCmdRefresh
-)
-
-// classifyMeta recognizes the small set of word-form meta commands. Plain
-// words (quit, help, describe, refresh) are intentional — psql-style \-
-// commands feel out of place here, and these don't collide with the SQL
-// dialect's keywords.
-func classifyMeta(line string) metaCmd {
-	cmd := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), ";"))
-	switch strings.ToUpper(cmd) {
-	case "QUIT", "EXIT":
-		return metaCmdQuit
-	case "HELP", "?":
-		return metaCmdHelp
-	case "DESCRIBE":
-		return metaCmdDescribe
-	case "REFRESH":
-		return metaCmdRefresh
+// parseMeta recognizes the bare-word meta commands. Plain words (no
+// leading dot or backslash) keep the prompt feeling like a SQL shell rather
+// than psql/sqlite; the names chosen don't collide with the SQL dialect's
+// keywords. Returns nil when the line is not a meta command — the caller
+// then routes it through the SQL parser.
+func parseMeta(line string) *metaCmd {
+	line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), ";"))
+	if line == "" {
+		return nil
 	}
-	return metaCmdNone
+	head, rest := splitFirstWord(line)
+	name := strings.ToLower(head)
+	switch name {
+	case "quit", "exit", "help", "?", "describe", "refresh",
+		"mode", "headers", "once", "output":
+		return &metaCmd{name: name, arg: unquote(rest)}
+	}
+	return nil
+}
+
+// splitFirstWord returns the leading whitespace-delimited token and the
+// trimmed remainder. Used to peel off the meta-command name.
+func splitFirstWord(s string) (head, rest string) {
+	i := strings.IndexAny(s, " \t")
+	if i < 0 {
+		return s, ""
+	}
+	return s[:i], strings.TrimSpace(s[i:])
+}
+
+// unquote strips a surrounding pair of single or double quotes. Inner
+// content is returned verbatim — no escape processing, so paths with
+// literal backslashes round-trip. Unbalanced quotes pass through as-is for
+// the dispatcher to surface as an error if it cares.
+func unquote(s string) string {
+	if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// dispatchMeta runs a parsed meta command against the session. quit=true
+// asks Run to exit the loop. err is non-nil when the command was malformed
+// or the backend doesn't support that knob.
+func dispatchMeta(s *Session, m *metaCmd, onceArmed *bool) (quit bool, err error) {
+	switch m.name {
+	case "quit", "exit":
+		return true, nil
+	case "help", "?":
+		printHelp(s.Out)
+		return false, nil
+	case "describe":
+		return false, s.Describe(s.Out)
+	case "refresh":
+		return false, s.Refresh()
+	case "mode":
+		return false, applyMode(s, m.arg)
+	case "headers":
+		return false, applyHeaders(s, m.arg)
+	case "output":
+		return false, applyOutput(s, m.arg, onceArmed)
+	case "once":
+		return false, applyOnce(s, m.arg, onceArmed)
+	}
+	return false, fmt.Errorf("internal: unhandled meta command %q", m.name)
+}
+
+func applyMode(s *Session, arg string) error {
+	if arg == "" {
+		return fmt.Errorf("mode: usage: mode <table|tsv|csv|json>")
+	}
+	switch arg {
+	case "table", "tsv", "csv", "json":
+	default:
+		return fmt.Errorf("unknown mode %q (want table, tsv, csv, or json)", arg)
+	}
+	if s.SetMode == nil {
+		return fmt.Errorf("backend does not support changing mode at runtime")
+	}
+	s.SetMode(arg)
+	return nil
+}
+
+func applyHeaders(s *Session, arg string) error {
+	if s.SetHeaders == nil {
+		return fmt.Errorf("backend does not support headers")
+	}
+	switch strings.ToLower(arg) {
+	case "on":
+		s.SetHeaders(true)
+	case "off":
+		s.SetHeaders(false)
+	case "":
+		return fmt.Errorf("headers: usage: headers on|off")
+	default:
+		return fmt.Errorf("headers: expected on or off, got %q", arg)
+	}
+	return nil
+}
+
+func applyOutput(s *Session, arg string, onceArmed *bool) error {
+	if s.SetOutputPath == nil {
+		return fmt.Errorf("backend does not support --output")
+	}
+	// `output` no-arg clears; `output PATH` redirects (sticky) and
+	// truncates the file once so subsequent SELECTs accumulate (the
+	// executor opens for append). Either way, an explicit OUTPUT
+	// cancels any pending once.
+	if arg != "" {
+		if err := TruncateOutputFile(arg); err != nil {
+			return err
+		}
+	}
+	s.SetOutputPath(arg)
+	*onceArmed = false
+	return nil
+}
+
+func applyOnce(s *Session, arg string, onceArmed *bool) error {
+	if s.SetOutputPath == nil {
+		return fmt.Errorf("backend does not support --output")
+	}
+	if arg == "" {
+		return fmt.Errorf("once: path required (e.g. once 'results.csv')")
+	}
+	if err := TruncateOutputFile(arg); err != nil {
+		return err
+	}
+	s.SetOutputPath(arg)
+	*onceArmed = true
+	return nil
+}
+
+// TruncateOutputFile resets the output file's contents so the next render
+// starts from an empty file. The executor opens with O_APPEND, so without
+// this reset a fresh `output 'FILE'` (or CLI --output) would tack onto
+// whatever was there. Exported so cmd/xql can call it from the CLI path.
+func TruncateOutputFile(path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("truncate output file: %w", err)
+	}
+	return f.Close()
 }
 
 func printHelp(out io.Writer) {
@@ -182,8 +317,13 @@ Append '!' to skip the prompt and commit immediately
 Meta-commands (case-insensitive):
   quit, exit         Exit the REPL.
   help, ?            This help.
-  describe           Print the bound table's columns and inferred types.
-  refresh            Re-read the bound table from its source.`)
+  describe           Print the bound source's columns and inferred types.
+  refresh            Re-read the bound source.
+  mode <name>        Set stdout render mode: table, tsv, csv, json.
+  headers on|off     Show or hide column headers in row-shaped output.
+  output 'PATH'      Redirect statement results to PATH as CSV (sticky).
+  output             Clear redirect; results return to stdout.
+  once 'PATH'        Redirect the NEXT statement only, then revert.`)
 }
 
 func printParseError(out io.Writer, input string, err error) {
