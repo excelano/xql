@@ -1,0 +1,84 @@
+# goreleaser configuration. Triggered by .github/workflows/release.yml on
+# every "v*" tag push. To test locally (optional):
+#   goreleaser release --snapshot --clean
+# Snapshots produce binaries in ./dist/ without touching GitHub.
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: xql
+    main: ./cmd/xql
+    binary: xql
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: xql
+    name_template: "xql_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    files:
+      - LICENSE
+      - README.md
+
+nfpms:
+  - id: xql
+    package_name: xql
+    file_name_template: "{{ .ConventionalFileName }}"
+    maintainer: David M. Anderson <david.anderson@excelano.com>
+    description: |
+      XQL — Excelano Query Language CLI.
+      One binary, one SQL dialect, multiple backends. CSV backend wired
+      in v1.x (in-memory edits with type inference, dry-run writes);
+      SharePoint backend follows in a later release.
+    homepage: https://github.com/excelano/xql
+    license: MIT
+    formats:
+      - deb
+    section: database
+    priority: optional
+    bindir: /usr/bin
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/xql/copyright
+      - src: ./README.md
+        dst: /usr/share/doc/xql/README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: false
+  prerelease: auto
+  # Ship install.sh alongside the platform tarballs so users can pin to a
+  # specific release URL instead of relying on the rolling main branch.
+  extra_files:
+    - glob: install.sh
+    - glob: uninstall.sh
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"

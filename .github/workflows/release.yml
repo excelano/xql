@@ -1,0 +1,44 @@
+name: release
+
+# Triggers on any tag matching v*, e.g. v1.0.1 or v2.0.0-rc1. workflow_dispatch
+# is the manual fallback in case a tag was created by another workflow's
+# GITHUB_TOKEN (which does not fire downstream "push" triggers).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Must already exist."
+        required: true
+
+# goreleaser needs to write to the GitHub release (upload assets), so the
+# job needs `contents: write` on the auto-provided GITHUB_TOKEN.
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # goreleaser uses git history to build the changelog, so we need
+          # full clone history rather than the default shallow one.
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
