@@ -32,7 +32,7 @@ Updated 8 of 8 rows. Wrote tasks.csv.
 
 Tabular data lives in many places — CSVs on disk, SharePoint Lists in M365 tenants, Excel exports, database tables. Editing them in bulk is awkward. Spreadsheet apps choke past a few hundred thousand rows, point-and-click web UIs are not scriptable, and writing a one-off script for each transform is overkill. `xql` is the smallest tool that lets you write one SQL statement, see what it would change, and commit if it is right — against whichever backend matches the data you have in front of you.
 
-v1.x ships the CSV backend (replacing the standalone [sqlcsv](https://github.com/excelano/sqlcsv)). The SharePoint backend (replacing standalone [spsql](https://github.com/excelano/spsql)) follows in v1.1.
+v1.0 shipped the CSV backend (replacing standalone [sqlcsv](https://github.com/excelano/sqlcsv)). v1.1 adds the SharePoint backend (replacing standalone [spsql](https://github.com/excelano/spsql)). The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
 
 ## Install
 
@@ -89,8 +89,8 @@ The uninstaller removes the `xql` binary it finds on `PATH` and asks before remo
 
 | Name | Extensions | Status |
 |------|------------|--------|
-| `csv` | `.csv`, `.tsv` | v1.0 |
-| `sp`  | (never inferred — URL + auth required) | v1.1 |
+| `csv` | `.csv`, `.tsv` | available |
+| `sp`  | (never inferred — URL + auth required) | available |
 
 `xql --help` lists registered backends. `xql <backend> --help` shows backend-specific flags.
 
@@ -154,13 +154,27 @@ A few inference behaviors are worth knowing:
 - **`NaN` and `Inf` are not treated as numeric.** Excel's `#DIV/0!`-as-`NaN` cells leak through `strconv.ParseFloat`, but `NaN` breaks SQL equality (NaN ≠ NaN) and pollutes round-trips, so the column falls back to `string` whenever they appear.
 - **Scientific notation in the data still infers as `float`.** If you have integer IDs that Excel rendered as `1.23E+12`, the round-trip will not restore the original integer string. Pin the column with `--type ID=string` to preserve the literal text.
 
+### SharePoint backend
+
+```
+xql sp --list https://contoso.sharepoint.com/sites/team/Lists/Tasks
+```
+
+The SharePoint backend binds to a single list and runs the same SQL grammar against it via Microsoft Graph. Authentication is device-code OAuth: the first run prints a short code and a URL to enter it at, and a refresh token is cached at `~/.config/xql/sp-token.json` (file mode 0600) so subsequent runs reauthenticate silently. The cached token is per-account; it carries `Sites.ReadWrite.All` delegated permission.
+
+`WHERE` predicates translate to OData `$filter` and run server-side, so even large lists return quickly. `ORDER BY`, `LIMIT`, `OFFSET`, and `DISTINCT` apply client-side after the filtered fetch. `LIKE` and `ILIKE` patterns translate to OData `startswith`, `endswith`, and `contains`; the underscore wildcard and mid-pattern `%` aren't expressible in OData and are rejected with a clear error rather than silently working incorrectly. `IN` expands to an `or` chain, and `BETWEEN` to a `ge`/`le` pair.
+
+`UPDATE`, `DELETE`, and `INSERT` validate against the list's column schema before any Graph round-trip: unknown columns, type mismatches, writes to read-only or system fields, and writes to Person/Lookup/Hyperlink/Calculated columns all fail fast. Writes preview a sample of affected rows and prompt `Apply? [y/N]:` in the REPL or require `--commit` in one-shot mode. A bare `DELETE` (no `WHERE`) in one-shot mode additionally requires `--confirm-destructive`. In the REPL, bare `DELETE` always prompts even with a trailing `!` shortcut.
+
+History persists at `~/.config/xql/history-sp`. The list URL can be the bare list root or an AllItems.aspx variant; URL-encoded list-name segments are decoded automatically. Pass `--all-fields` to include hidden and system columns in `SELECT *`; by default the REPL hides them, matching what the SharePoint UI shows.
+
 ## SQL subset
 
-`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `ORDER BY`, `LIMIT`. No JOINs, no subqueries. The grammar carries forward from `sqlcsv` v2.0 unchanged — code written against `sqlcsv` runs against `xql csv` as-is.
+`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `ORDER BY`, `LIMIT`. No JOINs, no subqueries. The grammar carries forward from `sqlcsv` v2.0 unchanged — code written against `sqlcsv` runs against `xql csv` as-is, and the same grammar applies to `xql sp`.
 
 ## Security
 
-`xql` runs locally and only touches files your OS user already has access to. v1.x makes no network calls. See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process.
+`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process.
 
 ## License
 

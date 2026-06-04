@@ -12,13 +12,15 @@ The latest v1.x release receives security fixes. Older versions are not supporte
 
 ## What xql can access
 
-xql is a CLI that runs locally on your machine. v1.x ships the CSV backend (`xql csv`); the SharePoint backend (`xql sp`) is a stub in v1.x and is not yet implemented. The CSV backend reads the file you point it at, holds it in memory for the duration of the session, and writes the modified file back when you commit a write statement. v1.x makes no network calls of any kind, has no auth layer, and does not implement administrative operations. It can only read and write files your operating-system user already has access to.
+xql is a CLI that runs locally on your machine. It ships two backends as of v1.1.
 
-When the SharePoint backend ships in a later release, this policy will be updated to describe its credential handling and network access.
+The CSV backend (`xql csv`) reads the file you point it at, holds it in memory for the duration of the session, and writes the modified file back when you commit a write statement. It makes no network calls, has no auth layer, and can only read and write files your operating-system user already has access to.
+
+The SharePoint backend (`xql sp`) calls Microsoft Graph over HTTPS to read and write items in a single bound SharePoint list. Authentication is delegated device-code OAuth against your Microsoft Entra ID account; the scope requested is `Sites.ReadWrite.All`. xql cannot access any data your account cannot already access in SharePoint Online. No other Graph endpoints are touched.
 
 ## What xql stores
 
-xql stores REPL command history at `~/.config/xql/history-csv` with file mode 0600 (directory mode 0700). That is everything: no telemetry, no analytics, no remote logging.
+xql stores REPL command history at `~/.config/xql/history-csv` and `~/.config/xql/history-sp` with file mode 0600 (directory mode 0700). The SharePoint backend additionally caches a refresh token at `~/.config/xql/sp-token.json` (mode 0600) so subsequent runs reauthenticate without another device-code prompt. Delete that file to force re-authentication; revoke the granted permission at https://myaccount.microsoft.com/applications to invalidate the token server-side. There is no telemetry, no analytics, and no remote logging.
 
 ## Verifying releases
 
