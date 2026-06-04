@@ -113,7 +113,7 @@ xql <path>           # equivalent when the extension is .csv or .tsv
 
 Opens a prompt bound to the file. Arrow keys recall history, Ctrl-R searches it, Ctrl-D exits. History persists at `~/.config/xql/history-csv` across sessions (one history file per backend).
 
-The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types, `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL.
+The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types, `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL. Output controls follow sqlite shapes (without the leading dot): `mode <table|tsv|csv|json>` sets how results render to stdout, `headers on|off` toggles the column-name row, `output 'PATH'` redirects subsequent SELECT results to PATH as CSV (sticky — type `output` with no argument to clear), and `once 'PATH'` redirects only the next statement.
 
 Writes (INSERT, UPDATE, DELETE) preview by default. `xql` prints the affected count, a sample of the rows that match, and then prompts `Apply? [y/N]:`. Anything but `y` cancels. Append `!` to skip the prompt and commit immediately:
 
@@ -121,7 +121,7 @@ Writes (INSERT, UPDATE, DELETE) preview by default. `xql` prints the affected co
 UPDATE SET Status = 'Done' WHERE Modified < '2024-01-01' !
 ```
 
-When a write is applied, `xql` rewrites the bound file. Pass `--output FILE` at startup to write to a different file instead.
+When a write is applied, `xql` rewrites the bound file. Pass `--output FILE` at startup (or use the `output` REPL command) to redirect both committed writes and SELECT results to a different file. `--output` always serializes CSV regardless of `--mode`; `--mode` controls the terminal view only.
 
 ### One-shot mode
 
