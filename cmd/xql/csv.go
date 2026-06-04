@@ -107,7 +107,7 @@ func runCSVImpl(args []string) int {
 	session := &repl.Session{
 		Out:         os.Stdout,
 		Stderr:      os.Stderr,
-		Prompt:      "xql csv> ",
+		Prompt:      "xql> ",
 		HistoryPath: filepath.Join(configDir(), "history-csv"),
 		Banner: fmt.Sprintf(
 			"Connected to: %s (%d columns, %d rows). Type \"help\" for commands, \"quit\" to exit.",

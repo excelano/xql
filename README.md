@@ -8,14 +8,14 @@
 $ xql tasks.csv
 Connected to: tasks.csv (5 columns, 248 rows). Type "help" for commands, "quit" to exit.
 
-xql csv> SELECT Title, Status WHERE Priority > 2
+xql> SELECT Title, Status WHERE Priority > 2
 | Title              | Status      |
 | ------------------ | ----------- |
 | Migrate auth layer | Open        |
 | Backfill activity  | In Progress |
 (2 rows)
 
-xql csv> UPDATE SET Status = 'Done' WHERE Modified < '2024-01-01'
+xql> UPDATE SET Status = 'Done' WHERE Modified < '2024-01-01'
 Would update 8 rows in tasks.csv:
   SET Status = "Done"
 Sample:

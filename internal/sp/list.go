@@ -43,12 +43,14 @@ type FieldInfo struct {
 // BoundList is the resolved single list this REPL session operates on.
 // Columns preserves Graph's response order (creation order in SharePoint) so
 // SELECT * renders columns predictably; Schema is the lookup map keyed by
-// internal name.
+// internal name. SourceURL is the original URL passed to ResolveListBinding,
+// kept so the REPL's refresh command can re-bind without re-asking the user.
 type BoundList struct {
 	SiteID      string
 	ListID      string
 	Name        string
 	DisplayName string
+	SourceURL   string
 	Columns     []string
 	Schema      map[string]FieldInfo
 }
@@ -127,6 +129,7 @@ func ResolveListBinding(ctx context.Context, graph *GraphClient, listURL string)
 		ListID:      listID,
 		Name:        foundName,
 		DisplayName: displayName,
+		SourceURL:   listURL,
 		Columns:     order,
 		Schema:      schema,
 	}, nil

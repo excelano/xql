@@ -25,7 +25,7 @@ import (
 type Session struct {
 	Out         io.Writer
 	Stderr      io.Writer
-	Prompt      string // e.g. "xql csv> "
+	Prompt      string // e.g. "xql> "
 	HistoryPath string // file path; loaded at start, written on exit
 	Banner      string // shown once after history loads, before the first prompt
 

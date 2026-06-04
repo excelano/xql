@@ -775,8 +775,16 @@ func (e *Executor) validateAssignments(assigns []parse.Assignment) error {
 }
 
 func (e *Executor) executeDelete(del *parse.DeleteStmt, commit bool) error {
+	// Bare DELETE in --exec mode requires --confirm-destructive; the y/N
+	// prompt isn't available there to catch a mistake. In REPL mode, the
+	// trailing '!' shortcut is downgraded so the user still sees the "Apply?
+	// [y/N]" prompt — bare DELETE is destructive enough that a one-character
+	// typo shouldn't be able to wipe the table.
 	if del.Where == nil && commit && !e.ConfirmDestructive && e.Confirm == nil {
 		return fmt.Errorf("bare DELETE (no WHERE) requires --confirm-destructive")
+	}
+	if del.Where == nil && e.Confirm != nil {
+		commit = false
 	}
 	if err := eval.ValidatePredicate(del.Where, e.Table.Schema); err != nil {
 		return err

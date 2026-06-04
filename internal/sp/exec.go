@@ -345,11 +345,16 @@ func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, com
 // executeDelete runs DELETE [WHERE ...]. Bare DELETE (no WHERE) is the
 // nuclear option and additionally requires ConfirmDestructive when commit=true.
 func (e *Executor) executeDelete(ctx context.Context, del *parse.DeleteStmt, commit bool) error {
-	// Bare DELETE in --exec mode (no REPL prompt) additionally requires
-	// --confirm-destructive. In REPL, the y/N prompt is the safety gate;
-	// a trailing '!' deliberately bypasses both prompt and this check.
+	// Bare DELETE in --exec mode requires --confirm-destructive; the y/N
+	// prompt isn't available there to catch a mistake. In REPL mode, the
+	// trailing '!' shortcut is downgraded so the user still sees the "Apply?
+	// [y/N]" prompt — bare DELETE is destructive enough that a one-character
+	// typo shouldn't be able to wipe the list.
 	if del.Where == nil && commit && !e.ConfirmDestructive && e.Confirm == nil {
 		return fmt.Errorf("bare DELETE (no WHERE) requires --confirm-destructive")
+	}
+	if del.Where == nil && e.Confirm != nil {
+		commit = false
 	}
 
 	items, err := e.fetchTargets(ctx, del.Where)

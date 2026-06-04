@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/excelano/xql/internal/parse"
+	"github.com/excelano/xql/internal/repl"
 	"github.com/excelano/xql/internal/sp"
 )
 
@@ -15,8 +16,9 @@ import (
 // argv stripped of "xql sp" — so args[0] is the first user-supplied token.
 //
 // Slice 1 wired --list. Slice 2 added --exec / --format / --all-fields for
-// one-shot SELECT. Slice 3 adds --commit / --confirm-destructive for
-// UPDATE/DELETE/INSERT with dry-run preview. The REPL lands in slice 4.
+// one-shot SELECT. Slice 3 added --commit / --confirm-destructive for
+// UPDATE/DELETE/INSERT with dry-run preview. Slice 4 wires the interactive
+// REPL when --exec is absent.
 func runSPImpl(args []string) int {
 	fs := flag.NewFlagSet("xql sp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -105,7 +107,26 @@ func runSPImpl(args []string) int {
 	}
 
 	fmt.Fprintf(os.Stderr, "Authenticated as: %s\n", result.Account.PreferredUsername)
-	fmt.Fprintf(os.Stderr, "Connected to: %s (%d columns)\n", bound.DisplayName, len(bound.Columns))
-	fmt.Fprintln(os.Stderr, "(REPL lands in slice 4; for now use --exec \"SELECT ...\" for one-shot queries)")
+
+	session := &repl.Session{
+		Out:         os.Stdout,
+		Stderr:      os.Stderr,
+		Prompt:      "xql> ",
+		HistoryPath: filepath.Join(configDir(), "history-sp"),
+		Banner: fmt.Sprintf(
+			"Connected to: %s (%d columns). Type \"help\" for commands, \"quit\" to exit.",
+			bound.DisplayName, len(bound.Columns),
+		),
+		Execute: func(stmt parse.Stmt, commit bool) error {
+			return exec.Execute(ctx, stmt, commit)
+		},
+		Describe:   exec.Describe,
+		Refresh:    exec.Refresh,
+		SetConfirm: exec.SetConfirm,
+	}
+	if err := repl.Run(session); err != nil {
+		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)
+		return 1
+	}
 	return 0
 }
