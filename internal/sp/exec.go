@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/excelano/xql/internal/cell"
+	"github.com/excelano/xql/internal/eval"
 	"github.com/excelano/xql/internal/parse"
 	"github.com/excelano/xql/internal/render"
 )
@@ -299,8 +301,7 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]string, error) {
 // executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments
 // and previews the affected rows; only when commit=true does it issue PATCHes.
 func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, commit bool) error {
-	body, err := e.buildFieldsBody(upd.Assignments)
-	if err != nil {
+	if err := e.validateAssignments(upd.Assignments); err != nil {
 		return err
 	}
 
@@ -311,7 +312,7 @@ func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, com
 
 	fmt.Fprintf(e.Out, "Would update %d row%s in %s:\n", len(items), plural(len(items)), e.Bound.DisplayName)
 	for _, a := range upd.Assignments {
-		fmt.Fprintf(e.Out, "  SET %s = %s\n", a.Column, jsonInline(body[a.Column]))
+		fmt.Fprintf(e.Out, "  SET %s = %s\n", a.Column, renderExpr(a.Value))
 	}
 	e.printSample(items)
 
@@ -326,8 +327,19 @@ func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, com
 		return nil
 	}
 
+	tbl, err := BuildCellTable(e.Bound, items)
+	if err != nil {
+		return fmt.Errorf("preparing rows for evaluation: %w", err)
+	}
+	evalCtx := eval.NewEvalContext(tbl)
+
 	succ := 0
-	for _, it := range items {
+	for i, it := range items {
+		body, berr := e.buildRowBody(upd.Assignments, tbl.Rows[i], evalCtx)
+		if berr != nil {
+			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, berr)
+			continue
+		}
 		path := fmt.Sprintf("/sites/%s/lists/%s/items/%s/fields", e.Bound.SiteID, e.Bound.ListID, it.ID)
 		if _, err := e.Graph.patch(ctx, path, body); err != nil {
 			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, err)
@@ -413,7 +425,10 @@ func (e *Executor) executeInsert(ctx context.Context, ins *parse.InsertStmt, com
 	for i, c := range ins.Columns {
 		assigns[i] = parse.Assignment{Column: c, Value: &parse.LiteralExpr{Value: ins.Values[i]}}
 	}
-	body, err := e.buildFieldsBody(assigns)
+	if err := e.validateAssignments(assigns); err != nil {
+		return err
+	}
+	body, err := e.buildRowBody(assigns, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -510,28 +525,175 @@ func (e *Executor) fetchTargets(ctx context.Context, where parse.Predicate) ([]l
 	return items, nil
 }
 
-// buildFieldsBody validates assignments and produces the JSON-encodable
-// map ready for a Graph PATCH (UPDATE) or POST {"fields": ...} (INSERT) body.
-// v1.1 commits only LiteralExpr assignments; computed RHS expressions land
-// in Pass 3 slice C.
-func (e *Executor) buildFieldsBody(assigns []parse.Assignment) (map[string]any, error) {
+// validateAssignments enforces v1 write rules on each assignment before
+// the executor fetches any data: each target column must exist, be writable,
+// have a supported type, and the RHS must be either a literal whose kind
+// matches the column type, or a computed expression that references only
+// existing columns, contains no aggregates, and produces a result type
+// compatible with the target column. Failing fast here means a bad UPDATE
+// surfaces its error without burning a Graph round-trip.
+func (e *Executor) validateAssignments(assigns []parse.Assignment) error {
+	cellSchema := buildCellSchemaFromFieldInfo(e.Bound.Schema)
+	for _, a := range assigns {
+		if lit, ok := a.Value.(*parse.LiteralExpr); ok {
+			if _, err := validateAssignment(a.Column, lit.Value, e.Bound.Schema); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := e.validateAssignmentExpr(a.Column, a.Value, cellSchema); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAssignmentExpr handles the computed-RHS path: schema + aggregate
+// check + result-type compatibility against the target SharePoint column.
+func (e *Executor) validateAssignmentExpr(col string, expr parse.Expr, cellSchema map[string]cell.ColumnInfo) error {
+	if eval.HasAggregate(expr) {
+		return fmt.Errorf("column %q: aggregate functions in UPDATE SET — SharePoint backend support lands in a later v1.1 slice", col)
+	}
+	if err := eval.ValidateExpr(expr, cellSchema); err != nil {
+		return fmt.Errorf("column %q: %w", col, err)
+	}
+	info, ok := e.Bound.Schema[col]
+	if !ok {
+		return fmt.Errorf("unknown column %q", col)
+	}
+	if info.ReadOnly {
+		return fmt.Errorf("column %q is read-only", col)
+	}
+	if !isWritableType(info.Type) {
+		return fmt.Errorf("column %q has type %s; writes to %s columns are not supported in v1", col, info.Type, info.Type)
+	}
+	resultType, err := eval.ExprType(expr, cellSchema)
+	if err != nil {
+		return fmt.Errorf("column %q: %w", col, err)
+	}
+	if !typesCompatibleForUpdate(resultType, info.Type) {
+		return fmt.Errorf("column %q: expression produces %s, target SharePoint column is %s", col, resultType, info.Type)
+	}
+	return nil
+}
+
+// typesCompatibleForUpdate gates which expression-result types can flow
+// into a write at a given SharePoint column. Text/Note/Choice accept any
+// scalar (we stringify); Number requires numeric; Boolean requires bool;
+// DateTime requires either a date result or a string we can parse.
+func typesCompatibleForUpdate(src cell.ColumnType, target FieldType) bool {
+	switch target {
+	case FieldText, FieldNote, FieldChoice:
+		return true
+	case FieldNumber:
+		return src == cell.TypeInt || src == cell.TypeFloat
+	case FieldBoolean:
+		return src == cell.TypeBool
+	case FieldDateTime:
+		return src == cell.TypeString || src == cell.TypeDate
+	}
+	return false
+}
+
+// buildRowBody produces the JSON-encodable map ready for a Graph PATCH or
+// POST {"fields": ...} body. Literal assignments use the validated literal
+// path; computed assignments evaluate against the supplied row via
+// internal/eval and convert the typed result back to the JSON shape Graph
+// expects. Validation should have run first via validateAssignments; this
+// path skips re-validation in the hot per-row loop.
+//
+// INSERT calls this with (nil, nil) because INSERT values are parser-level
+// literals only; the eval branch is never taken there.
+func (e *Executor) buildRowBody(assigns []parse.Assignment, row cell.Row, ctx *eval.EvalContext) (map[string]any, error) {
 	body := map[string]any{}
 	for _, a := range assigns {
-		lit, ok := a.Value.(*parse.LiteralExpr)
-		if !ok {
-			return nil, fmt.Errorf("column %q: computed assignments (non-literal RHS) — SharePoint backend support lands in a later v1.1 slice", a.Column)
+		if lit, ok := a.Value.(*parse.LiteralExpr); ok {
+			info := e.Bound.Schema[a.Column]
+			fj, err := valueToFieldJSON(lit.Value, info.Type)
+			if err != nil {
+				return nil, fmt.Errorf("column %q: %v", a.Column, err)
+			}
+			body[a.Column] = fj
+			continue
 		}
-		info, err := validateAssignment(a.Column, lit.Value, e.Bound.Schema)
+		info := e.Bound.Schema[a.Column]
+		result, err := eval.EvalExpr(a.Value, row, ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("column %q: %v", a.Column, err)
 		}
-		fj, err := valueToFieldJSON(lit.Value, info.Type)
+		fj, err := evalCellToFieldJSON(result, info.Type)
 		if err != nil {
 			return nil, fmt.Errorf("column %q: %v", a.Column, err)
 		}
 		body[a.Column] = fj
 	}
 	return body, nil
+}
+
+// evalCellToFieldJSON converts a typed expression result to the JSON shape
+// Graph expects in a fields body. NULL universally maps to JSON null; for
+// non-null values, we honor the target SharePoint column's type (e.g.
+// integer-valued floats coerce to int64 so Graph stores them without a
+// spurious decimal point, and string expression results bound for a
+// DateTime column get parsed and normalized).
+func evalCellToFieldJSON(c eval.EvalCell, target FieldType) (any, error) {
+	if c.Cell.Null {
+		return nil, nil
+	}
+	switch target {
+	case FieldText, FieldNote, FieldChoice:
+		switch c.Type {
+		case cell.TypeString:
+			return c.Cell.Str, nil
+		case cell.TypeInt:
+			return strconv.FormatInt(c.Cell.Int, 10), nil
+		case cell.TypeFloat:
+			return formatNumberAsString(c.Cell.Float), nil
+		case cell.TypeBool:
+			if c.Cell.Bool {
+				return "true", nil
+			}
+			return "false", nil
+		case cell.TypeDate:
+			return c.Cell.Date.UTC().Format("2006-01-02T15:04:05Z"), nil
+		}
+	case FieldNumber:
+		switch c.Type {
+		case cell.TypeInt:
+			return c.Cell.Int, nil
+		case cell.TypeFloat:
+			if c.Cell.Float == float64(int64(c.Cell.Float)) {
+				return int64(c.Cell.Float), nil
+			}
+			return c.Cell.Float, nil
+		}
+	case FieldBoolean:
+		if c.Type == cell.TypeBool {
+			return c.Cell.Bool, nil
+		}
+	case FieldDateTime:
+		switch c.Type {
+		case cell.TypeDate:
+			return c.Cell.Date.UTC().Format("2006-01-02T15:04:05Z"), nil
+		case cell.TypeString:
+			ts, err := cell.ParseDateString(c.Cell.Str)
+			if err != nil {
+				return nil, fmt.Errorf("invalid datetime %q: %w", c.Cell.Str, err)
+			}
+			return ts.UTC().Format("2006-01-02T15:04:05Z"), nil
+		}
+	}
+	return nil, fmt.Errorf("cannot coerce %s expression result to %s target", c.Type, target)
+}
+
+// buildCellSchemaFromFieldInfo is the FieldInfo-to-cell.ColumnInfo map used
+// by validation paths that don't need the full Bound.Columns ordering.
+func buildCellSchemaFromFieldInfo(schema map[string]FieldInfo) map[string]cell.ColumnInfo {
+	out := make(map[string]cell.ColumnInfo, len(schema))
+	for name, fi := range schema {
+		out[name] = cell.ColumnInfo{Name: name, Type: FieldTypeToCellType(fi.Type)}
+	}
+	return out
 }
 
 // printSample emits a small preview table: id + a primary column (Title when

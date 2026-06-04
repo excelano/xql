@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/excelano/xql/internal/cell"
+	"github.com/excelano/xql/internal/eval"
 	"github.com/excelano/xql/internal/parse"
 )
 
@@ -137,20 +139,24 @@ func TestIsWritableType(t *testing.T) {
 	}
 }
 
-// TestBuildFieldsBody covers the path through the executor's per-assignment
-// validation and JSON shaping, including order independence (map output) and
-// mixed-type batches.
-func TestBuildFieldsBody(t *testing.T) {
+// TestBuildRowBodyLiterals covers the literal-only path through the
+// executor's per-assignment validation and JSON shaping, including order
+// independence (map output) and mixed-type batches.
+func TestBuildRowBodyLiterals(t *testing.T) {
 	e := &Executor{Bound: &BoundList{Schema: execTestSchema()}}
-	body, err := e.buildFieldsBody([]parse.Assignment{
+	assigns := []parse.Assignment{
 		{Column: "Title", Value: litE(vstr("hello"))},
 		{Column: "Count", Value: litE(vnum("3"))},
 		{Column: "Active", Value: litE(vbool(true))},
 		{Column: "Due", Value: litE(vstr("2024-01-01"))},
 		{Column: "Status", Value: litE(vnull())},
-	})
+	}
+	if err := e.validateAssignments(assigns); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	body, err := e.buildRowBody(assigns, nil, nil)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected body error: %v", err)
 	}
 	want := map[string]any{
 		"Title":  "hello",
@@ -169,9 +175,9 @@ func TestBuildFieldsBody(t *testing.T) {
 	}
 }
 
-func TestBuildFieldsBodyRejects(t *testing.T) {
+func TestValidateAssignmentsRejectsLiteralOnUnsupportedType(t *testing.T) {
 	e := &Executor{Bound: &BoundList{Schema: execTestSchema()}}
-	_, err := e.buildFieldsBody([]parse.Assignment{
+	err := e.validateAssignments([]parse.Assignment{
 		{Column: "Title", Value: litE(vstr("ok"))},
 		{Column: "Owner", Value: litE(vstr("u@x"))},
 	})
@@ -352,6 +358,285 @@ func TestDistinctKey(t *testing.T) {
 			}
 			if !tc.same && ka == kb {
 				t.Errorf("expected different keys, both = %q", ka)
+			}
+		})
+	}
+}
+
+// computedUpdateBound returns a bound list shaped for the computed-RHS
+// tests: Title is text, Counter is number, Active is bool, Due is dateTime,
+// Modified is read-only.
+func computedUpdateBound() *BoundList {
+	return &BoundList{
+		Columns: []string{"Title", "Counter", "Active", "Due", "Modified"},
+		Schema: map[string]FieldInfo{
+			"Title":    {Name: "Title", Type: FieldText},
+			"Counter":  {Name: "Counter", Type: FieldNumber},
+			"Active":   {Name: "Active", Type: FieldBoolean},
+			"Due":      {Name: "Due", Type: FieldDateTime},
+			"Modified": {Name: "Modified", Type: FieldDateTime, ReadOnly: true},
+		},
+	}
+}
+
+func TestValidateAssignmentsComputed(t *testing.T) {
+	e := &Executor{Bound: computedUpdateBound()}
+
+	cases := []struct {
+		name    string
+		assigns []parse.Assignment
+		wantErr string // substring; empty = expect success
+	}{
+		{
+			name: "counter + 1 on Number column",
+			assigns: []parse.Assignment{
+				{Column: "Counter", Value: &parse.BinaryExpr{
+					Op: "+",
+					L:  &parse.ColumnExpr{Name: "Counter"},
+					R:  &parse.LiteralExpr{Value: vnum("1")},
+				}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "counter * 2 on Number column",
+			assigns: []parse.Assignment{
+				{Column: "Counter", Value: &parse.BinaryExpr{
+					Op: "*",
+					L:  &parse.ColumnExpr{Name: "Counter"},
+					R:  &parse.LiteralExpr{Value: vnum("2")},
+				}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "computed RHS targeting read-only column",
+			assigns: []parse.Assignment{
+				{Column: "Modified", Value: &parse.BinaryExpr{
+					Op: "+",
+					L:  &parse.ColumnExpr{Name: "Counter"},
+					R:  &parse.LiteralExpr{Value: vnum("1")},
+				}},
+			},
+			wantErr: "read-only",
+		},
+		{
+			name: "computed RHS referencing unknown column",
+			assigns: []parse.Assignment{
+				{Column: "Counter", Value: &parse.BinaryExpr{
+					Op: "+",
+					L:  &parse.ColumnExpr{Name: "Nope"},
+					R:  &parse.LiteralExpr{Value: vnum("1")},
+				}},
+			},
+			wantErr: `unknown column "Nope"`,
+		},
+		{
+			name: "computed numeric RHS targeting Boolean column",
+			assigns: []parse.Assignment{
+				{Column: "Active", Value: &parse.BinaryExpr{
+					Op: "+",
+					L:  &parse.ColumnExpr{Name: "Counter"},
+					R:  &parse.LiteralExpr{Value: vnum("1")},
+				}},
+			},
+			wantErr: "target SharePoint column is boolean",
+		},
+		{
+			name: "aggregate in UPDATE SET rejected with slice pointer",
+			assigns: []parse.Assignment{
+				{Column: "Counter", Value: &parse.AggregateExpr{
+					Func: "SUM",
+					Arg:  &parse.ColumnExpr{Name: "Counter"},
+				}},
+			},
+			wantErr: "aggregate functions in UPDATE SET",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := e.validateAssignments(tc.assigns)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestBuildRowBodyComputed drives the per-row evaluation path: assignments
+// with non-literal RHS evaluate against the supplied row and produce the
+// correct integer-vs-float JSON coercion for Number columns.
+func TestBuildRowBodyComputed(t *testing.T) {
+	bound := computedUpdateBound()
+	e := &Executor{Bound: bound}
+
+	items := []listItem{
+		{ID: "1", Fields: map[string]any{"Counter": float64(3)}},
+	}
+	tbl, err := BuildCellTable(bound, items)
+	if err != nil {
+		t.Fatalf("build table: %v", err)
+	}
+	ctx := eval.NewEvalContext(tbl)
+
+	assigns := []parse.Assignment{
+		{Column: "Counter", Value: &parse.BinaryExpr{
+			Op: "+",
+			L:  &parse.ColumnExpr{Name: "Counter"},
+			R:  &parse.LiteralExpr{Value: vnum("1")},
+		}},
+	}
+	if err := e.validateAssignments(assigns); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	body, err := e.buildRowBody(assigns, tbl.Rows[0], ctx)
+	if err != nil {
+		t.Fatalf("buildRowBody: %v", err)
+	}
+
+	// 3 + 1 = 4: integer-valued float must coerce to int64 so Graph stores
+	// without a decimal point.
+	got, ok := body["Counter"].(int64)
+	if !ok {
+		t.Fatalf("Counter = %#v (%T), want int64", body["Counter"], body["Counter"])
+	}
+	if got != 4 {
+		t.Errorf("Counter = %d, want 4", got)
+	}
+}
+
+// TestBuildRowBodyComputedNullProp confirms NULL propagation: if a row's
+// referenced column is NULL, the arithmetic result is NULL, which writes
+// JSON null to the Graph PATCH body.
+func TestBuildRowBodyComputedNullProp(t *testing.T) {
+	bound := computedUpdateBound()
+	e := &Executor{Bound: bound}
+
+	items := []listItem{
+		{ID: "1", Fields: map[string]any{}}, // Counter absent → NULL cell
+	}
+	tbl, err := BuildCellTable(bound, items)
+	if err != nil {
+		t.Fatalf("build table: %v", err)
+	}
+	ctx := eval.NewEvalContext(tbl)
+
+	assigns := []parse.Assignment{
+		{Column: "Counter", Value: &parse.BinaryExpr{
+			Op: "+",
+			L:  &parse.ColumnExpr{Name: "Counter"},
+			R:  &parse.LiteralExpr{Value: vnum("1")},
+		}},
+	}
+	body, err := e.buildRowBody(assigns, tbl.Rows[0], ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body["Counter"] != nil {
+		t.Errorf("Counter = %#v, want nil (NULL propagated)", body["Counter"])
+	}
+}
+
+func TestTypesCompatibleForUpdate(t *testing.T) {
+	cases := []struct {
+		src    cell.ColumnType
+		target FieldType
+		want   bool
+	}{
+		// Text family accepts everything (we stringify).
+		{cell.TypeString, FieldText, true},
+		{cell.TypeInt, FieldText, true},
+		{cell.TypeFloat, FieldNote, true},
+		{cell.TypeBool, FieldChoice, true},
+		// Number requires numeric.
+		{cell.TypeInt, FieldNumber, true},
+		{cell.TypeFloat, FieldNumber, true},
+		{cell.TypeString, FieldNumber, false},
+		{cell.TypeBool, FieldNumber, false},
+		// Boolean is strict.
+		{cell.TypeBool, FieldBoolean, true},
+		{cell.TypeInt, FieldBoolean, false},
+		{cell.TypeString, FieldBoolean, false},
+		// DateTime accepts string (parsed) or date.
+		{cell.TypeDate, FieldDateTime, true},
+		{cell.TypeString, FieldDateTime, true},
+		{cell.TypeInt, FieldDateTime, false},
+	}
+	for _, tc := range cases {
+		got := typesCompatibleForUpdate(tc.src, tc.target)
+		if got != tc.want {
+			t.Errorf("typesCompatibleForUpdate(%s, %s) = %v, want %v", tc.src, tc.target, got, tc.want)
+		}
+	}
+}
+
+func TestEvalCellToFieldJSON(t *testing.T) {
+	cases := []struct {
+		name   string
+		ec     eval.EvalCell
+		target FieldType
+		want   any
+	}{
+		{
+			name:   "int to Number stays int64",
+			ec:     eval.EvalCell{Cell: cell.Cell{Int: 7}, Type: cell.TypeInt},
+			target: FieldNumber,
+			want:   int64(7),
+		},
+		{
+			name:   "integer-valued float to Number coerces to int64",
+			ec:     eval.EvalCell{Cell: cell.Cell{Float: 4.0}, Type: cell.TypeFloat},
+			target: FieldNumber,
+			want:   int64(4),
+		},
+		{
+			name:   "non-integer float to Number stays float",
+			ec:     eval.EvalCell{Cell: cell.Cell{Float: 1.5}, Type: cell.TypeFloat},
+			target: FieldNumber,
+			want:   1.5,
+		},
+		{
+			name:   "string to Text passes through",
+			ec:     eval.EvalCell{Cell: cell.Cell{Str: "hello"}, Type: cell.TypeString},
+			target: FieldText,
+			want:   "hello",
+		},
+		{
+			name:   "int to Text stringifies",
+			ec:     eval.EvalCell{Cell: cell.Cell{Int: 42}, Type: cell.TypeInt},
+			target: FieldText,
+			want:   "42",
+		},
+		{
+			name:   "bool to Boolean passes through",
+			ec:     eval.EvalCell{Cell: cell.Cell{Bool: true}, Type: cell.TypeBool},
+			target: FieldBoolean,
+			want:   true,
+		},
+		{
+			name:   "null cell produces nil regardless of target",
+			ec:     eval.EvalCell{Cell: cell.Cell{Null: true}, Type: cell.TypeString},
+			target: FieldText,
+			want:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := evalCellToFieldJSON(tc.ec, tc.target)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %#v (%T), want %#v (%T)", got, got, tc.want, tc.want)
 			}
 		})
 	}
