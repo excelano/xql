@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,7 +34,44 @@ type Executor struct {
 	AllFields          bool
 	ConfirmDestructive bool
 	Confirm            func() bool
+	OutputPath         string
 	Out                io.Writer
+}
+
+// renderSelect dispatches the result either to stdout in the chosen mode or
+// to OutputPath as CSV. --output always serializes CSV regardless of --mode:
+// the flag's contract is "the result of this statement lands here", and the
+// only sensible on-disk shape for tabular data is RFC 4180 CSV. Mode controls
+// the terminal view only.
+//
+// --output on this backend is SELECT-only: SharePoint mutations write back to
+// the bound list itself, not a returnable artifact, so executeUpdate/Delete/
+// Insert reject the flag up front.
+func (e *Executor) renderSelect(r render.Result) error {
+	if e.OutputPath == "" {
+		return render.Render(e.Out, r, e.Mode, e.Headers)
+	}
+	f, err := os.Create(e.OutputPath)
+	if err != nil {
+		return fmt.Errorf("create --output file: %w", err)
+	}
+	defer f.Close()
+	if err := render.Render(f, r, render.FormatCSV, e.Headers); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.Out, "Wrote %d row%s to %s.\n", len(r.Rows), plural(len(r.Rows)), e.OutputPath)
+	return nil
+}
+
+// rejectMutationOutput returns the standard error sp mutations emit when
+// --output is set. Mutations on a SharePoint list have no extractable result
+// — the changes apply to the list in place — so the flag is meaningless
+// here and we fail fast rather than silently ignore it.
+func (e *Executor) rejectMutationOutput(verb string) error {
+	if e.OutputPath == "" {
+		return nil
+	}
+	return fmt.Errorf("--output is not supported with %s on the sp backend; SharePoint writes back to the list", verb)
 }
 
 // Execute dispatches to the per-statement handler. The commit flag distinguishes
@@ -144,7 +182,7 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 		rows = relabelRows(rows, plan)
 	}
 
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
+	return e.renderSelect(render.Result{Columns: labelCols, Rows: rows})
 }
 
 // relabelRows builds new per-row maps keyed by the projection's output label,
@@ -471,7 +509,7 @@ func (e *Executor) executeImplicitAggregation(ctx context.Context, sel *parse.Se
 	if err != nil {
 		return err
 	}
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
+	return e.renderSelect(render.Result{Columns: labelCols, Rows: rows})
 }
 
 // aggregateOneRow runs the aggregate slots over every row in tbl, then
@@ -571,7 +609,7 @@ func (e *Executor) executeGroupedAggregation(ctx context.Context, sel *parse.Sel
 	if err != nil {
 		return err
 	}
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
+	return e.renderSelect(render.Result{Columns: labelCols, Rows: rows})
 }
 
 // aggregateGrouped is the pure, testable core of the grouped-aggregation
@@ -929,6 +967,9 @@ func compareOutputValue(a, b any, t cell.ColumnType) int {
 // executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments
 // and previews the affected rows; only when commit=true does it issue PATCHes.
 func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, commit bool) error {
+	if err := e.rejectMutationOutput("UPDATE"); err != nil {
+		return err
+	}
 	if err := e.validateAssignments(upd.Assignments); err != nil {
 		return err
 	}
@@ -985,6 +1026,9 @@ func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, com
 // executeDelete runs DELETE [WHERE ...]. Bare DELETE (no WHERE) is the
 // nuclear option and additionally requires ConfirmDestructive when commit=true.
 func (e *Executor) executeDelete(ctx context.Context, del *parse.DeleteStmt, commit bool) error {
+	if err := e.rejectMutationOutput("DELETE"); err != nil {
+		return err
+	}
 	// Bare DELETE in --exec mode requires --confirm-destructive; the y/N
 	// prompt isn't available there to catch a mistake. In REPL mode, the
 	// trailing '!' shortcut is downgraded so the user still sees the "Apply?
@@ -1039,6 +1083,9 @@ func (e *Executor) executeDelete(ctx context.Context, del *parse.DeleteStmt, com
 // executeInsert runs INSERT (cols) VALUES (vals). Validates column/value
 // pairing and types; previews the row; only POSTs when commit=true.
 func (e *Executor) executeInsert(ctx context.Context, ins *parse.InsertStmt, commit bool) error {
+	if err := e.rejectMutationOutput("INSERT"); err != nil {
+		return err
+	}
 	if len(ins.Columns) != len(ins.Values) {
 		return fmt.Errorf("INSERT has %d column%s but %d value%s", len(ins.Columns), plural(len(ins.Columns)), len(ins.Values), plural(len(ins.Values)))
 	}

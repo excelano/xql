@@ -1916,3 +1916,53 @@ func TestAggregateGroupedOrderByAfterDistinct(t *testing.T) {
 		t.Errorf("DISTINCT + ORDER BY = %+v, want one row {one: 1}", rows)
 	}
 }
+
+func TestRejectMutationOutput_UpdateDeleteInsert(t *testing.T) {
+	// --output is SELECT-only on the sp backend; mutations must error before
+	// any Graph call. The reject helper runs at the top of each execute*
+	// path, so a minimal Executor (no Graph) is enough to drive the check.
+	cases := []struct {
+		name string
+		stmt parse.Stmt
+		want string
+	}{
+		{
+			name: "update",
+			stmt: &parse.UpdateStmt{
+				Assignments: []parse.Assignment{{Column: "Title", Value: &parse.LiteralExpr{Value: parse.Value{Kind: parse.ValString, Str: "x"}}}},
+			},
+			want: "UPDATE",
+		},
+		{
+			name: "delete",
+			stmt: &parse.DeleteStmt{},
+			want: "DELETE",
+		},
+		{
+			name: "insert",
+			stmt: &parse.InsertStmt{
+				Columns: []string{"Title"},
+				Values:  []parse.Value{{Kind: parse.ValString, Str: "x"}},
+			},
+			want: "INSERT",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &Executor{
+				Bound:      &BoundList{Schema: execTestSchema()},
+				OutputPath: "/tmp/should-not-write",
+			}
+			err := e.Execute(nil, tc.stmt, true)
+			if err == nil {
+				t.Fatal("expected error for mutation + --output")
+			}
+			if !strings.Contains(err.Error(), "--output is not supported") {
+				t.Errorf("error should mention --output: %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should name verb %q: %v", tc.want, err)
+			}
+		})
+	}
+}

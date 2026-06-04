@@ -3,6 +3,7 @@ package csv
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
@@ -176,7 +177,28 @@ func (e *Executor) executeSelect(sel *parse.SelectStmt) error {
 		}
 		rows[i] = m
 	}
-	return render.Render(e.Out, render.Result{Columns: labels, Rows: rows}, e.Mode, e.Headers)
+	return e.renderSelect(render.Result{Columns: labels, Rows: rows})
+}
+
+// renderSelect dispatches the result either to stdout in the chosen mode or
+// to OutputPath as CSV. --output always serializes CSV regardless of --mode:
+// the flag's contract is "the result of this statement lands here", and the
+// only sensible on-disk shape for tabular data is RFC 4180 CSV. Mode controls
+// the terminal view only.
+func (e *Executor) renderSelect(r render.Result) error {
+	if e.OutputPath == "" {
+		return render.Render(e.Out, r, e.Mode, e.Headers)
+	}
+	f, err := os.Create(e.OutputPath)
+	if err != nil {
+		return fmt.Errorf("create --output file: %w", err)
+	}
+	defer f.Close()
+	if err := render.Render(f, r, render.FormatCSV, e.Headers); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.Out, "Wrote %d row%s to %s.\n", len(r.Rows), plural(len(r.Rows)), e.OutputPath)
+	return nil
 }
 
 // projEntry is one entry in the SELECT projection plan: the output column

@@ -1550,6 +1550,81 @@ func TestExecOutputPath(t *testing.T) {
 	}
 }
 
+func TestExecSelectOutputPathWritesCSV(t *testing.T) {
+	e, stdout, _ := newExec(t)
+	dst := filepath.Join(t.TempDir(), "select-out.csv")
+	e.OutputPath = dst
+
+	stmt, err := parse.Parse("SELECT Title, Priority WHERE Status = 'Open'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Result body went to the file, not stdout.
+	if strings.Contains(stdout.String(), "Title") {
+		t.Errorf("result column header leaked to stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), dst) {
+		t.Errorf("expected stdout to confirm write to %q: %q", dst, stdout.String())
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	want := "Title,Priority\r\n"
+	if !strings.HasPrefix(string(got), want) {
+		t.Errorf("output should start with CSV header %q, got %q", want, string(got))
+	}
+}
+
+func TestExecSelectOutputPathHonorsNoOutputHeader(t *testing.T) {
+	e, _, _ := newExec(t)
+	dst := filepath.Join(t.TempDir(), "select-noheader.csv")
+	e.OutputPath = dst
+	e.Headers = false
+
+	stmt, err := parse.Parse("SELECT Title, Priority WHERE ID = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got, _ := os.ReadFile(dst)
+	if strings.Contains(string(got), "Title") {
+		t.Errorf("header should be suppressed: %q", string(got))
+	}
+}
+
+func TestExecSelectOutputPathIgnoresMode(t *testing.T) {
+	// --output always emits CSV regardless of --mode; --mode is a stdout-only knob.
+	e, _, _ := newExec(t)
+	e.Mode = "json"
+	dst := filepath.Join(t.TempDir(), "select-mode.csv")
+	e.OutputPath = dst
+
+	stmt, err := parse.Parse("SELECT Title WHERE ID = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	got, _ := os.ReadFile(dst)
+	if strings.HasPrefix(string(got), "[") || strings.HasPrefix(string(got), "{") {
+		t.Errorf("--mode json should not affect --output file (always CSV): %q", string(got))
+	}
+	if !strings.Contains(string(got), "Title\r\n") {
+		t.Errorf("expected CRLF-terminated CSV header: %q", string(got))
+	}
+}
+
 func TestExecDecideCommit(t *testing.T) {
 	// commit=true bypasses everything.
 	e := &Executor{}

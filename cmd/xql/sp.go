@@ -30,6 +30,7 @@ func runSPImpl(args []string) int {
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagAllFields      = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
 		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE (no WHERE) in --exec mode")
+		flagOutput         = fs.String("output", "", "Write SELECT results as CSV to this path (SELECT only on sp)")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 	)
 
@@ -87,6 +88,7 @@ func runSPImpl(args []string) int {
 		Headers:            !*flagNoOutputHeader,
 		AllFields:          *flagAllFields,
 		ConfirmDestructive: *flagConfirm,
+		OutputPath:         *flagOutput,
 		Out:                os.Stdout,
 	}
 

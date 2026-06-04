@@ -28,7 +28,7 @@ func runCSVImpl(args []string) int {
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE in --exec mode")
-		flagOutput         = fs.String("output", "", "Write committed changes to this path instead of the bound CSV")
+		flagOutput         = fs.String("output", "", "Write the statement result to this path as CSV (SELECT rows; or the modified table for committed UPDATE/DELETE/INSERT)")
 		flagNoInputHeader  = fs.Bool("no-input-header", false, "Source CSV has no header row; columns are named col1, col2, ...")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 		flagDelim          = fs.String("delim", ",", "Single-character field delimiter (use \\t for tab)")
