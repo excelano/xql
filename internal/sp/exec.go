@@ -36,18 +36,16 @@ type Executor struct {
 // Execute dispatches to the per-statement handler. The commit flag distinguishes
 // dry-run (commit=false: preview only) from a real write (commit=true: preview
 // + apply). It is ignored for SELECT.
-//
-// Slice 2 wires SELECT only; UPDATE/DELETE/INSERT land in slice 3.
 func (e *Executor) Execute(ctx context.Context, stmt parse.Stmt, commit bool) error {
 	switch s := stmt.(type) {
 	case *parse.SelectStmt:
 		return e.executeSelect(ctx, s)
 	case *parse.UpdateStmt:
-		return fmt.Errorf("UPDATE: SharePoint backend support lands in slice 3")
+		return e.executeUpdate(ctx, s, commit)
 	case *parse.DeleteStmt:
-		return fmt.Errorf("DELETE: SharePoint backend support lands in slice 3")
+		return e.executeDelete(ctx, s, commit)
 	case *parse.InsertStmt:
-		return fmt.Errorf("INSERT: SharePoint backend support lands in slice 3")
+		return e.executeInsert(ctx, s, commit)
 	}
 	return fmt.Errorf("internal: unknown statement type %T", stmt)
 }
@@ -296,4 +294,396 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]string, error) {
 		cols = append(cols, name)
 	}
 	return cols, nil
+}
+
+// executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments
+// and previews the affected rows; only when commit=true does it issue PATCHes.
+func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, commit bool) error {
+	body, err := e.buildFieldsBody(upd.Assignments)
+	if err != nil {
+		return err
+	}
+
+	items, err := e.fetchTargets(ctx, upd.Where)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(e.Out, "Would update %d row%s in %s:\n", len(items), plural(len(items)), e.Bound.DisplayName)
+	for _, a := range upd.Assignments {
+		fmt.Fprintf(e.Out, "  SET %s = %s\n", a.Column, jsonInline(body[a.Column]))
+	}
+	e.printSample(items)
+
+	proceed, msg := e.decideCommit(commit)
+	if msg != "" {
+		fmt.Fprintln(e.Out, msg)
+	}
+	if !proceed {
+		return nil
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	succ := 0
+	for _, it := range items {
+		path := fmt.Sprintf("/sites/%s/lists/%s/items/%s/fields", e.Bound.SiteID, e.Bound.ListID, it.ID)
+		if _, err := e.Graph.patch(ctx, path, body); err != nil {
+			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, err)
+			continue
+		}
+		succ++
+	}
+	fmt.Fprintf(e.Out, "Updated %d of %d row%s.\n", succ, len(items), plural(len(items)))
+	if succ < len(items) {
+		return fmt.Errorf("%d row%s failed to update", len(items)-succ, plural(len(items)-succ))
+	}
+	return nil
+}
+
+// executeDelete runs DELETE [WHERE ...]. Bare DELETE (no WHERE) is the
+// nuclear option and additionally requires ConfirmDestructive when commit=true.
+func (e *Executor) executeDelete(ctx context.Context, del *parse.DeleteStmt, commit bool) error {
+	// Bare DELETE in --exec mode (no REPL prompt) additionally requires
+	// --confirm-destructive. In REPL, the y/N prompt is the safety gate;
+	// a trailing '!' deliberately bypasses both prompt and this check.
+	if del.Where == nil && commit && !e.ConfirmDestructive && e.Confirm == nil {
+		return fmt.Errorf("bare DELETE (no WHERE) requires --confirm-destructive")
+	}
+
+	items, err := e.fetchTargets(ctx, del.Where)
+	if err != nil {
+		return err
+	}
+
+	if del.Where == nil {
+		fmt.Fprintf(e.Out, "Would delete ALL %d row%s from %s:\n", len(items), plural(len(items)), e.Bound.DisplayName)
+	} else {
+		fmt.Fprintf(e.Out, "Would delete %d row%s from %s:\n", len(items), plural(len(items)), e.Bound.DisplayName)
+	}
+	e.printSample(items)
+
+	proceed, msg := e.decideCommit(commit)
+	if msg != "" {
+		fmt.Fprintln(e.Out, msg)
+	}
+	if !proceed {
+		return nil
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	succ := 0
+	for _, it := range items {
+		path := fmt.Sprintf("/sites/%s/lists/%s/items/%s", e.Bound.SiteID, e.Bound.ListID, it.ID)
+		if err := e.Graph.delete(ctx, path); err != nil {
+			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, err)
+			continue
+		}
+		succ++
+	}
+	fmt.Fprintf(e.Out, "Deleted %d of %d row%s.\n", succ, len(items), plural(len(items)))
+	if succ < len(items) {
+		return fmt.Errorf("%d row%s failed to delete", len(items)-succ, plural(len(items)-succ))
+	}
+	return nil
+}
+
+// executeInsert runs INSERT (cols) VALUES (vals). Validates column/value
+// pairing and types; previews the row; only POSTs when commit=true.
+func (e *Executor) executeInsert(ctx context.Context, ins *parse.InsertStmt, commit bool) error {
+	if len(ins.Columns) != len(ins.Values) {
+		return fmt.Errorf("INSERT has %d column%s but %d value%s", len(ins.Columns), plural(len(ins.Columns)), len(ins.Values), plural(len(ins.Values)))
+	}
+	seen := map[string]bool{}
+	for _, c := range ins.Columns {
+		if seen[c] {
+			return fmt.Errorf("INSERT column %q appears twice", c)
+		}
+		seen[c] = true
+	}
+	assigns := make([]parse.Assignment, len(ins.Columns))
+	for i, c := range ins.Columns {
+		assigns[i] = parse.Assignment{Column: c, Value: &parse.LiteralExpr{Value: ins.Values[i]}}
+	}
+	body, err := e.buildFieldsBody(assigns)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(e.Out, "Would insert row into %s:\n", e.Bound.DisplayName)
+	for _, c := range ins.Columns {
+		fmt.Fprintf(e.Out, "  %s = %s\n", c, jsonInline(body[c]))
+	}
+
+	proceed, msg := e.decideCommit(commit)
+	if msg != "" {
+		fmt.Fprintln(e.Out, msg)
+	}
+	if !proceed {
+		return nil
+	}
+
+	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
+	resp, err := e.Graph.post(ctx, path, map[string]any{"fields": body})
+	if err != nil {
+		return err
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if jerr := json.Unmarshal(resp, &created); jerr == nil && created.ID != "" {
+		fmt.Fprintf(e.Out, "Inserted row id=%s.\n", created.ID)
+	} else {
+		fmt.Fprintln(e.Out, "Inserted row.")
+	}
+	return nil
+}
+
+// decideCommit resolves a write's commit/abort decision after the preview has
+// been shown. Three outcomes:
+//   - commit=true (trailing '!' in REPL, --commit in --exec): proceed silently.
+//   - REPL (Confirm != nil): ask the user; on "y", proceed; otherwise "(aborted)".
+//   - --exec without --commit (Confirm == nil): never commit; print the
+//     "(dry run; pass --commit to apply)" hint.
+//
+// The returned message, when non-empty, should be printed before the function
+// returns; "" means proceed without further output.
+func (e *Executor) decideCommit(commit bool) (bool, string) {
+	if commit {
+		return true, ""
+	}
+	if e.Confirm == nil {
+		return false, "(dry run; pass --commit to apply)"
+	}
+	if e.Confirm() {
+		return true, ""
+	}
+	return false, "(aborted)"
+}
+
+// listItem is the minimal subset of a list item resource the write path needs:
+// the numeric id and the user fields subobject (for previews and ID-based
+// PATCH/DELETE URLs).
+type listItem struct {
+	ID     string
+	Fields map[string]any
+}
+
+// fetchTargets runs the equivalent of SELECT * WHERE <pred> and returns the
+// matched items as listItem records. nil WHERE returns every row in the list.
+func (e *Executor) fetchTargets(ctx context.Context, where parse.Predicate) ([]listItem, error) {
+	q := url.Values{"$expand": {"fields"}}
+	if where != nil {
+		filter, err := ToOData(where, e.Bound.Schema)
+		if err != nil {
+			return nil, err
+		}
+		q.Set("$filter", filter)
+	}
+	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
+	raws, err := e.Graph.getAll(ctx, path, q)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]listItem, 0, len(raws))
+	for _, raw := range raws {
+		var it struct {
+			ID     string         `json:"id"`
+			Fields map[string]any `json:"fields"`
+		}
+		if err := json.Unmarshal(raw, &it); err != nil {
+			return nil, fmt.Errorf("decoding list item: %w", err)
+		}
+		if it.Fields == nil {
+			it.Fields = map[string]any{}
+		}
+		items = append(items, listItem{ID: it.ID, Fields: it.Fields})
+	}
+	return items, nil
+}
+
+// buildFieldsBody validates assignments and produces the JSON-encodable
+// map ready for a Graph PATCH (UPDATE) or POST {"fields": ...} (INSERT) body.
+// v1.1 commits only LiteralExpr assignments; computed RHS expressions land
+// in Pass 3 slice C.
+func (e *Executor) buildFieldsBody(assigns []parse.Assignment) (map[string]any, error) {
+	body := map[string]any{}
+	for _, a := range assigns {
+		lit, ok := a.Value.(*parse.LiteralExpr)
+		if !ok {
+			return nil, fmt.Errorf("column %q: computed assignments (non-literal RHS) — SharePoint backend support lands in a later v1.1 slice", a.Column)
+		}
+		info, err := validateAssignment(a.Column, lit.Value, e.Bound.Schema)
+		if err != nil {
+			return nil, err
+		}
+		fj, err := valueToFieldJSON(lit.Value, info.Type)
+		if err != nil {
+			return nil, fmt.Errorf("column %q: %v", a.Column, err)
+		}
+		body[a.Column] = fj
+	}
+	return body, nil
+}
+
+// printSample emits a small preview table: id + a primary column (Title when
+// present, else the first user column). At most previewSampleMax rows; a
+// trailing "... N more" line counts what was elided.
+func (e *Executor) printSample(items []listItem) {
+	if len(items) == 0 {
+		return
+	}
+	previewCols := e.previewColumns()
+	header := append([]string{"id"}, previewCols...)
+	sample := items
+	if len(sample) > previewSampleMax {
+		sample = sample[:previewSampleMax]
+	}
+	rows := make([]map[string]any, len(sample))
+	for i, it := range sample {
+		row := map[string]any{"id": it.ID}
+		for _, c := range previewCols {
+			row[c] = it.Fields[c]
+		}
+		rows[i] = row
+	}
+	fmt.Fprintln(e.Out, "Sample:")
+	_ = render.WriteTableBody(e.Out, header, rows)
+	if len(items) > previewSampleMax {
+		fmt.Fprintf(e.Out, "  ... %d more\n", len(items)-previewSampleMax)
+	}
+}
+
+const previewSampleMax = 5
+
+// previewColumns returns the column(s) to show alongside the id in write
+// previews. Prefers Title; otherwise the first non-hidden non-readonly user
+// column.
+func (e *Executor) previewColumns() []string {
+	if _, ok := e.Bound.Schema["Title"]; ok {
+		return []string{"Title"}
+	}
+	for _, c := range e.Bound.Columns {
+		info := e.Bound.Schema[c]
+		if info.Hidden || info.ReadOnly {
+			continue
+		}
+		return []string{c}
+	}
+	return nil
+}
+
+// jsonInline produces a compact JSON literal for display in previews. Strings
+// come out quoted, numbers and booleans bare, NULL as `null` — matching what
+// will actually be sent over the wire.
+func jsonInline(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
+}
+
+// validateAssignment enforces v1 write rules: the column must exist and be
+// writable (not read-only, type in the supported set), and the literal value
+// must match the column's type (NULL is universal for any writable type).
+func validateAssignment(col string, v parse.Value, schema map[string]FieldInfo) (FieldInfo, error) {
+	info, ok := schema[col]
+	if !ok {
+		return FieldInfo{}, fmt.Errorf("unknown column %q", col)
+	}
+	if info.ReadOnly {
+		return FieldInfo{}, fmt.Errorf("column %q is read-only", col)
+	}
+	if !isWritableType(info.Type) {
+		return FieldInfo{}, fmt.Errorf("column %q has type %s; writes to %s columns are not supported in v1", col, info.Type, info.Type)
+	}
+	if v.Kind == parse.ValNull {
+		return info, nil
+	}
+	if err := valueMatchesType(v, info.Type); err != nil {
+		return FieldInfo{}, fmt.Errorf("column %q: %v", col, err)
+	}
+	return info, nil
+}
+
+func isWritableType(t FieldType) bool {
+	switch t {
+	case FieldText, FieldNote, FieldNumber, FieldBoolean, FieldDateTime, FieldChoice:
+		return true
+	}
+	return false
+}
+
+func valueMatchesType(v parse.Value, t FieldType) error {
+	switch t {
+	case FieldText, FieldNote, FieldChoice:
+		if v.Kind != parse.ValString {
+			return fmt.Errorf("expected string, got %s", valueKindName(v.Kind))
+		}
+	case FieldNumber:
+		if v.Kind != parse.ValNumber {
+			return fmt.Errorf("expected number, got %s", valueKindName(v.Kind))
+		}
+	case FieldBoolean:
+		if v.Kind != parse.ValBool {
+			return fmt.Errorf("expected true or false, got %s", valueKindName(v.Kind))
+		}
+	case FieldDateTime:
+		if v.Kind != parse.ValString {
+			return fmt.Errorf("expected ISO 8601 datetime string, got %s", valueKindName(v.Kind))
+		}
+		if _, err := normalizeDateTime(v.Str); err != nil {
+			return fmt.Errorf("invalid datetime %q", v.Str)
+		}
+	}
+	return nil
+}
+
+func valueKindName(k parse.ValueKind) string {
+	switch k {
+	case parse.ValString:
+		return "string"
+	case parse.ValNumber:
+		return "number"
+	case parse.ValBool:
+		return "boolean"
+	case parse.ValNull:
+		return "null"
+	}
+	return "unknown"
+}
+
+// valueToFieldJSON returns the JSON-encodable Go value Graph expects in a
+// PATCH body for the given field type. Integer-valued numbers come out as
+// int64 so they marshal without a decimal point.
+func valueToFieldJSON(v parse.Value, t FieldType) (any, error) {
+	if v.Kind == parse.ValNull {
+		return nil, nil
+	}
+	switch t {
+	case FieldText, FieldNote, FieldChoice:
+		return v.Str, nil
+	case FieldNumber:
+		if n, err := strconv.ParseInt(v.Num, 10, 64); err == nil {
+			return n, nil
+		}
+		f, err := strconv.ParseFloat(v.Num, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parsing number %q", v.Num)
+		}
+		return f, nil
+	case FieldBoolean:
+		return v.Bool, nil
+	case FieldDateTime:
+		s, err := normalizeDateTime(v.Str)
+		if err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
+	return nil, fmt.Errorf("internal: cannot serialize value to type %s", t)
 }

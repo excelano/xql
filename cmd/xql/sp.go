@@ -14,9 +14,9 @@ import (
 // runSPImpl is the SharePoint-backend entry point. The dispatcher hands us
 // argv stripped of "xql sp" — so args[0] is the first user-supplied token.
 //
-// Slice 1 wired --list. Slice 2 adds --exec / --format / --all-fields for
-// one-shot SELECT queries. Writes (--commit, --confirm-destructive) and the
-// REPL land in slices 3 and 4.
+// Slice 1 wired --list. Slice 2 added --exec / --format / --all-fields for
+// one-shot SELECT. Slice 3 adds --commit / --confirm-destructive for
+// UPDATE/DELETE/INSERT with dry-run preview. The REPL lands in slice 4.
 func runSPImpl(args []string) int {
 	fs := flag.NewFlagSet("xql sp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -25,7 +25,9 @@ func runSPImpl(args []string) int {
 		flagList      = fs.String("list", "", "SharePoint list URL (required)")
 		flagExec      = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
 		flagFormat    = fs.String("format", "", "Output format: table | tsv | json (auto-detected if blank)")
+		flagCommit    = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagAllFields = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
+		flagConfirm   = fs.Bool("confirm-destructive", false, "Required for bare DELETE (no WHERE) in --exec mode")
 	)
 
 	fs.Usage = func() {
@@ -76,11 +78,12 @@ func runSPImpl(args []string) int {
 	}
 
 	exec := &sp.Executor{
-		Graph:     graph,
-		Bound:     bound,
-		Format:    *flagFormat,
-		AllFields: *flagAllFields,
-		Out:       os.Stdout,
+		Graph:              graph,
+		Bound:              bound,
+		Format:             *flagFormat,
+		AllFields:          *flagAllFields,
+		ConfirmDestructive: *flagConfirm,
+		Out:                os.Stdout,
 	}
 
 	if *flagExec != "" {
@@ -94,7 +97,7 @@ func runSPImpl(args []string) int {
 			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
 			return 1
 		}
-		if err := exec.Execute(ctx, stmt, false); err != nil {
+		if err := exec.Execute(ctx, stmt, *flagCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
 			return 1
 		}
