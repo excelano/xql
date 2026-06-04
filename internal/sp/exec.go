@@ -63,6 +63,12 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 	if err != nil {
 		return err
 	}
+	if planHasAggregate(plan) {
+		if len(sel.OrderBy) > 0 {
+			return fmt.Errorf("ORDER BY on aggregated queries: SharePoint backend support lands in a later v1.1 slice")
+		}
+		return e.executeImplicitAggregation(ctx, sel, plan)
+	}
 	if err := e.validateOrderBy(sel.OrderBy); err != nil {
 		return err
 	}
@@ -291,15 +297,20 @@ func distinctKey(fields map[string]any, cols []string) string {
 }
 
 // projEntry is one entry in the SELECT projection plan. Source is the
-// SharePoint field name the value comes from; Label is the output column
-// name shown in headers and used as the row-map key at render time. For a
-// bare column reference without AS, the two are equal.
+// SharePoint field name the value comes from for the bare-column fast path
+// (empty when the projection is an aggregate or other expression that needs
+// the evaluator). Label is the output column name shown in headers and used
+// as the row-map key at render time. Expr is the parse-tree expression
+// evaluated per row in the aggregated path; nil in the bare-column fast
+// path. Type is the static result type of Expr, used to flatten the
+// EvalCell back to a renderable Go value.
 //
-// Slices E–G will grow this struct (Expr for computed/aggregate projections,
-// Type for typed rendering); slice D keeps it intentionally minimal.
+// Slice F will reuse this shape unchanged; slice G adds ORDER BY by Label.
 type projEntry struct {
 	Source string
 	Label  string
+	Expr   parse.Expr
+	Type   cell.ColumnType
 }
 
 // resolveProjection decides which columns to return. SELECT * uses every
@@ -308,10 +319,16 @@ type projEntry struct {
 // produce a clear error. AS aliases rename the output header without
 // affecting the underlying Graph fetch.
 //
-// v2 grammar shapes still unsupported (aggregates, arithmetic projections)
-// parse successfully but error here until the corresponding Pass 3 slice
-// lands.
+// When any projection contains an aggregate, every bare column reference
+// must be wrapped in an aggregate (standard SQL implicit-aggregation rule);
+// aggregates themselves are validated up front so SUM(Title) fails at plan
+// time, before the row scan.
+//
+// v2 grammar shapes still unsupported (non-aggregate arithmetic
+// projections) parse successfully but error here until the corresponding
+// Pass 3 slice lands.
 func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error) {
+	cellSchema := buildCellSchemaFromFieldInfo(e.Bound.Schema)
 	if sel.Star {
 		out := make([]projEntry, 0, len(e.Bound.Columns))
 		for _, name := range e.Bound.Columns {
@@ -319,34 +336,172 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error)
 			if !e.AllFields && info.Hidden {
 				continue
 			}
-			out = append(out, projEntry{Source: name, Label: name})
+			out = append(out, projEntry{
+				Source: name,
+				Label:  name,
+				Expr:   &parse.ColumnExpr{Name: name},
+				Type:   FieldTypeToCellType(info.Type),
+			})
 		}
 		return out, nil
+	}
+	anyAgg := false
+	for _, pr := range sel.Columns {
+		if eval.HasAggregate(pr.Expr) {
+			anyAgg = true
+			break
+		}
 	}
 	plan := make([]projEntry, 0, len(sel.Columns))
 	seen := make(map[string]struct{}, len(sel.Columns))
 	for _, pr := range sel.Columns {
-		if _, isAgg := pr.Expr.(*parse.AggregateExpr); isAgg {
-			return nil, fmt.Errorf("aggregate expressions: SharePoint backend support lands in a later v1.1 slice")
+		if !anyAgg {
+			name, ok := columnExprName(pr.Expr)
+			if !ok {
+				return nil, fmt.Errorf("computed projection expressions: SharePoint backend support lands in a later v1.1 slice")
+			}
+			info, ok := e.Bound.Schema[name]
+			if !ok {
+				return nil, fmt.Errorf("unknown column %q (not in list schema)", name)
+			}
+			label := pr.Alias
+			if label == "" {
+				label = name
+			}
+			if _, dup := seen[label]; dup {
+				return nil, fmt.Errorf("duplicate output column %q; use AS to give them distinct names", label)
+			}
+			seen[label] = struct{}{}
+			plan = append(plan, projEntry{
+				Source: name,
+				Label:  label,
+				Expr:   pr.Expr,
+				Type:   FieldTypeToCellType(info.Type),
+			})
+			continue
 		}
-		name, ok := columnExprName(pr.Expr)
-		if !ok {
-			return nil, fmt.Errorf("computed projection expressions: SharePoint backend support lands in a later v1.1 slice")
+		// Aggregated projection: bare column references must be inside an
+		// aggregate, and every aggregate node is validated up front.
+		if bare := eval.BareColumn(pr.Expr); bare != "" {
+			return nil, fmt.Errorf("column %q must appear inside an aggregate or in GROUP BY", bare)
 		}
-		if _, ok := e.Bound.Schema[name]; !ok {
-			return nil, fmt.Errorf("unknown column %q (not in list schema)", name)
+		if err := eval.ValidateExpr(pr.Expr, cellSchema); err != nil {
+			return nil, err
+		}
+		for _, a := range eval.CollectAggregates(pr.Expr, nil) {
+			if err := eval.ValidateAggregate(a, cellSchema); err != nil {
+				return nil, err
+			}
+		}
+		t, err := eval.ExprType(pr.Expr, cellSchema)
+		if err != nil {
+			return nil, err
 		}
 		label := pr.Alias
 		if label == "" {
-			label = name
+			label = renderExpr(pr.Expr)
 		}
 		if _, dup := seen[label]; dup {
 			return nil, fmt.Errorf("duplicate output column %q; use AS to give them distinct names", label)
 		}
 		seen[label] = struct{}{}
-		plan = append(plan, projEntry{Source: name, Label: label})
+		plan = append(plan, projEntry{Label: label, Expr: pr.Expr, Type: t})
 	}
 	return plan, nil
+}
+
+// planHasAggregate reports whether any projection plan entry contains an
+// aggregate. Used by executeSelect to pick the implicit-aggregation path.
+func planHasAggregate(plan []projEntry) bool {
+	for _, p := range plan {
+		if eval.HasAggregate(p.Expr) {
+			return true
+		}
+	}
+	return false
+}
+
+// executeImplicitAggregation handles SELECT with aggregates and no GROUP BY.
+// WHERE still translates to OData and runs server-side; the filtered rows
+// are converted to typed cells via the slice A adapter, fed through one
+// AggSlot per unique parse.AggregateExpr pointer, then each projection
+// expression is evaluated once with the slot results injected via
+// ctx.AggResults. The output is always exactly one row, even when the
+// filter matched nothing — COUNT(*) returns 0; the other aggregates return
+// NULL.
+func (e *Executor) executeImplicitAggregation(ctx context.Context, sel *parse.SelectStmt, plan []projEntry) error {
+	items, err := e.fetchTargets(ctx, sel.Where)
+	if err != nil {
+		return err
+	}
+	tbl, err := BuildCellTable(e.Bound, items)
+	if err != nil {
+		return err
+	}
+	labelCols, rows, err := aggregateOneRow(tbl, plan, sel.Offset, sel.Limit)
+	if err != nil {
+		return err
+	}
+	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Format)
+}
+
+// aggregateOneRow runs the aggregate slots over every row in tbl, then
+// evaluates each projection once and packages the result as the single
+// output row the renderer expects. OFFSET >= 1 and LIMIT 0 both clip the
+// row out, matching csv's behavior — DISTINCT on a single row is a no-op
+// and isn't honored here. Pulled out so tests can drive it with a hand-
+// built cell.Table instead of a live Graph fetch.
+func aggregateOneRow(tbl *cell.Table, plan []projEntry, offset, limit *int) ([]string, []map[string]any, error) {
+	evalCtx := eval.NewEvalContext(tbl)
+	slotByExpr := make(map[*parse.AggregateExpr]*eval.AggSlot)
+	var slots []*eval.AggSlot
+	for _, p := range plan {
+		for _, a := range eval.CollectAggregates(p.Expr, nil) {
+			if _, ok := slotByExpr[a]; ok {
+				continue
+			}
+			s, err := eval.NewAggSlot(a, tbl.Schema)
+			if err != nil {
+				return nil, nil, err
+			}
+			slotByExpr[a] = s
+			slots = append(slots, s)
+		}
+	}
+	for _, row := range tbl.Rows {
+		for _, s := range slots {
+			if err := s.Advance(row, evalCtx); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	evalCtx.AggResults = make(map[*parse.AggregateExpr]eval.EvalCell, len(slots))
+	for a, s := range slotByExpr {
+		evalCtx.AggResults[a] = s.Finalize()
+	}
+
+	labelCols := make([]string, len(plan))
+	out := make(map[string]any, len(plan))
+	for i, p := range plan {
+		labelCols[i] = p.Label
+		// The row arg is unused: the plan rejected bare columns when aggregates
+		// are present, so the only column refs left are inside aggregates that
+		// resolve through ctx.AggResults rather than the row.
+		res, err := eval.EvalExpr(p.Expr, nil, evalCtx)
+		if err != nil {
+			return nil, nil, err
+		}
+		out[p.Label] = res.Cell.AsAny(p.Type)
+	}
+
+	rows := []map[string]any{out}
+	if offset != nil && *offset >= 1 {
+		rows = rows[:0]
+	}
+	if limit != nil && *limit == 0 {
+		rows = rows[:0]
+	}
+	return labelCols, rows, nil
 }
 
 // executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments

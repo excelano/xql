@@ -850,3 +850,274 @@ func TestRelabelRows(t *testing.T) {
 		t.Errorf("row 2 missing source key should map to nil, got %v", got[2]["T"])
 	}
 }
+
+// aggExpr is a test helper that builds a parse.AggregateExpr around either
+// a column reference (when col != "") or star (Star: true).
+func aggExpr(fn, col string) *parse.AggregateExpr {
+	a := &parse.AggregateExpr{Func: fn}
+	if col == "" {
+		a.Star = true
+	} else {
+		a.Arg = &parse.ColumnExpr{Name: col}
+	}
+	return a
+}
+
+func TestResolveProjectionAcceptsAggregates(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: aggExpr("COUNT", "")},
+			{Expr: aggExpr("SUM", "Count"), Alias: "total"},
+		},
+	}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan) != 2 {
+		t.Fatalf("got %d plan entries, want 2", len(plan))
+	}
+	if plan[0].Label != "COUNT(*)" {
+		t.Errorf("plan[0].Label = %q, want COUNT(*)", plan[0].Label)
+	}
+	if plan[0].Source != "" {
+		t.Errorf("plan[0].Source = %q, want empty for aggregate", plan[0].Source)
+	}
+	if plan[0].Type != cell.TypeInt {
+		t.Errorf("plan[0].Type = %v, want TypeInt", plan[0].Type)
+	}
+	if plan[1].Label != "total" {
+		t.Errorf("plan[1].Label = %q, want total (alias)", plan[1].Label)
+	}
+}
+
+func TestResolveProjectionRejectsBareColumnAlongsideAggregate(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: &parse.ColumnExpr{Name: "Title"}},
+			{Expr: aggExpr("COUNT", "")},
+		},
+	}
+	_, err := e.resolveProjection(sel)
+	if err == nil || !strings.Contains(err.Error(), `column "Title" must appear inside an aggregate or in GROUP BY`) {
+		t.Errorf("got %v, want bare-column rejection", err)
+	}
+}
+
+func TestResolveProjectionRejectsSumOnText(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: aggExpr("SUM", "Title")},
+		},
+	}
+	_, err := e.resolveProjection(sel)
+	if err == nil {
+		t.Fatalf("expected SUM(Title) to fail validation")
+	}
+	// Exact wording lives in eval.ValidateAggregate; confirm SUM and the
+	// type complaint are present so a user can locate the problem.
+	msg := err.Error()
+	if !strings.Contains(msg, "SUM") || !strings.Contains(msg, "numeric") {
+		t.Errorf("error %q should reference SUM and numeric", msg)
+	}
+}
+
+func TestResolveProjectionDuplicateAggregateLabels(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: aggExpr("COUNT", ""), Alias: "n"},
+			{Expr: aggExpr("SUM", "Count"), Alias: "n"},
+		},
+	}
+	_, err := e.resolveProjection(sel)
+	if err == nil || !strings.Contains(err.Error(), `duplicate output column "n"`) {
+		t.Errorf("got %v, want duplicate label error", err)
+	}
+}
+
+func TestResolveProjectionAggregateDefaultLabelFromExpr(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: aggExpr("COUNT", "")},
+			{Expr: aggExpr("SUM", "Count")},
+		},
+	}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan[0].Label != "COUNT(*)" || plan[1].Label != "SUM(Count)" {
+		t.Errorf("labels = %q,%q; want COUNT(*) and SUM(Count)", plan[0].Label, plan[1].Label)
+	}
+}
+
+func TestPlanHasAggregate(t *testing.T) {
+	plain := []projEntry{
+		{Source: "Title", Label: "Title", Expr: &parse.ColumnExpr{Name: "Title"}},
+	}
+	if planHasAggregate(plain) {
+		t.Error("planHasAggregate returned true for plain projection")
+	}
+	withAgg := []projEntry{
+		{Label: "n", Expr: aggExpr("COUNT", "")},
+	}
+	if !planHasAggregate(withAgg) {
+		t.Error("planHasAggregate returned false for aggregate projection")
+	}
+}
+
+// aggTestTable builds a five-row cell.Table with a Title (string) column
+// and a Count (float) column. Row 4 has a NULL Count to exercise the
+// "skip-NULL" branch in non-COUNT aggregates and the difference between
+// COUNT(*) and COUNT(Count).
+func aggTestTable() *cell.Table {
+	schema := map[string]cell.ColumnInfo{
+		"Title": {Name: "Title", Type: cell.TypeString},
+		"Count": {Name: "Count", Type: cell.TypeFloat},
+	}
+	cols := []string{"Title", "Count"}
+	rows := []cell.Row{
+		{cell.Cell{Str: "a"}, cell.Cell{Float: 1}},
+		{cell.Cell{Str: "b"}, cell.Cell{Float: 2}},
+		{cell.Cell{Str: "c"}, cell.Cell{Float: 3}},
+		{cell.Cell{Str: "d"}, cell.Cell{Float: 4}},
+		{cell.Cell{Str: "e"}, cell.Cell{Null: true}},
+	}
+	return &cell.Table{Columns: cols, Schema: schema, Rows: rows}
+}
+
+func TestAggregateOneRowCountStar(t *testing.T) {
+	tbl := aggTestTable()
+	plan := []projEntry{{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt}}
+	cols, rows, err := aggregateOneRow(tbl, plan, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["n"] != int64(5) {
+		t.Errorf("cols=%v rows=%v, want one row with n=5", cols, rows)
+	}
+}
+
+func TestAggregateOneRowSumAvgMinMax(t *testing.T) {
+	tbl := aggTestTable()
+	plan := []projEntry{
+		{Label: "s", Expr: aggExpr("SUM", "Count"), Type: cell.TypeFloat},
+		{Label: "a", Expr: aggExpr("AVG", "Count"), Type: cell.TypeFloat},
+		{Label: "mn", Expr: aggExpr("MIN", "Count"), Type: cell.TypeFloat},
+		{Label: "mx", Expr: aggExpr("MAX", "Count"), Type: cell.TypeFloat},
+	}
+	_, rows, err := aggregateOneRow(tbl, plan, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	r := rows[0]
+	if r["s"] != float64(10) {
+		t.Errorf("SUM = %v, want 10", r["s"])
+	}
+	if r["a"] != float64(2.5) {
+		t.Errorf("AVG = %v, want 2.5", r["a"])
+	}
+	if r["mn"] != float64(1) {
+		t.Errorf("MIN = %v, want 1", r["mn"])
+	}
+	if r["mx"] != float64(4) {
+		t.Errorf("MAX = %v, want 4", r["mx"])
+	}
+}
+
+func TestAggregateOneRowCountColumnSkipsNull(t *testing.T) {
+	tbl := aggTestTable()
+	plan := []projEntry{
+		{Label: "all", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+		{Label: "nn", Expr: aggExpr("COUNT", "Count"), Type: cell.TypeInt},
+	}
+	_, rows, err := aggregateOneRow(tbl, plan, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rows[0]["all"] != int64(5) {
+		t.Errorf("COUNT(*) = %v, want 5", rows[0]["all"])
+	}
+	if rows[0]["nn"] != int64(4) {
+		t.Errorf("COUNT(Count) = %v, want 4 (skip NULL)", rows[0]["nn"])
+	}
+}
+
+func TestAggregateOneRowEmptyTable(t *testing.T) {
+	tbl := &cell.Table{
+		Columns: []string{"Title", "Count"},
+		Schema: map[string]cell.ColumnInfo{
+			"Title": {Name: "Title", Type: cell.TypeString},
+			"Count": {Name: "Count", Type: cell.TypeFloat},
+		},
+	}
+	plan := []projEntry{
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+		{Label: "s", Expr: aggExpr("SUM", "Count"), Type: cell.TypeFloat},
+	}
+	_, rows, err := aggregateOneRow(tbl, plan, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one row even over empty table, got %d", len(rows))
+	}
+	if rows[0]["n"] != int64(0) {
+		t.Errorf("COUNT(*) over empty = %v, want 0", rows[0]["n"])
+	}
+	if rows[0]["s"] != nil {
+		t.Errorf("SUM over empty = %v, want nil (NULL)", rows[0]["s"])
+	}
+}
+
+func TestAggregateOneRowSharedSlotForRepeatedAggregate(t *testing.T) {
+	// Same parse.AggregateExpr pointer reused across the plan should be
+	// scored exactly once, not advanced twice per row.
+	tbl := aggTestTable()
+	shared := aggExpr("COUNT", "")
+	plan := []projEntry{
+		{Label: "a", Expr: shared, Type: cell.TypeInt},
+		{Label: "b", Expr: shared, Type: cell.TypeInt},
+	}
+	_, rows, err := aggregateOneRow(tbl, plan, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rows[0]["a"] != int64(5) || rows[0]["b"] != int64(5) {
+		t.Errorf("shared slot got %v / %v, want 5 / 5", rows[0]["a"], rows[0]["b"])
+	}
+}
+
+func TestAggregateOneRowLimitZeroClips(t *testing.T) {
+	tbl := aggTestTable()
+	plan := []projEntry{{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt}}
+	zero := 0
+	_, rows, err := aggregateOneRow(tbl, plan, nil, &zero)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("LIMIT 0 should clip the row, got %d rows", len(rows))
+	}
+}
+
+func TestAggregateOneRowOffsetOneClips(t *testing.T) {
+	tbl := aggTestTable()
+	plan := []projEntry{{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt}}
+	one := 1
+	_, rows, err := aggregateOneRow(tbl, plan, &one, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("OFFSET 1 should clip the only row, got %d rows", len(rows))
+	}
+}
