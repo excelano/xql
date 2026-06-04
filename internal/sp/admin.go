@@ -26,7 +26,7 @@ func (e *Executor) Describe(w io.Writer) error {
 	return render.Render(w, render.Result{
 		Columns: []string{"name", "type", "hidden", "readonly"},
 		Rows:    rows,
-	}, e.Format)
+	}, e.Mode, true)
 }
 
 // Refresh re-resolves the bound list from its source URL, picking up any

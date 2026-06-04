@@ -25,7 +25,8 @@ import (
 // than the bound CSV. Empty means "write back to cell.Table.Path".
 type Executor struct {
 	Table              *cell.Table
-	Format             string
+	Mode               string
+	Headers            bool
 	ConfirmDestructive bool
 	Confirm            func() bool
 	OutputPath         string
@@ -175,7 +176,7 @@ func (e *Executor) executeSelect(sel *parse.SelectStmt) error {
 		}
 		rows[i] = m
 	}
-	return render.Render(e.Out, render.Result{Columns: labels, Rows: rows}, e.Format)
+	return render.Render(e.Out, render.Result{Columns: labels, Rows: rows}, e.Mode, e.Headers)
 }
 
 // projEntry is one entry in the SELECT projection plan: the output column

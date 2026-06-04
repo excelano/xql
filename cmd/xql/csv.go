@@ -24,14 +24,15 @@ func runCSVImpl(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagExec     = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
-		flagFormat   = fs.String("format", "", "Output format: table | tsv | json (auto-detected if blank)")
-		flagCommit   = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
-		flagConfirm  = fs.Bool("confirm-destructive", false, "Required for bare DELETE in --exec mode")
-		flagOutput   = fs.String("output", "", "Write committed changes to this path instead of the bound CSV")
-		flagNoHeader = fs.Bool("no-header", false, "CSV has no header row; columns are named col1, col2, ...")
-		flagDelim    = fs.String("delim", ",", "Single-character field delimiter (use \\t for tab)")
-		flagTypes    = fs.String("type", "", "Comma-separated column type overrides, e.g. Priority=int,Tags=string")
+		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
+		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
+		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE in --exec mode")
+		flagOutput         = fs.String("output", "", "Write committed changes to this path instead of the bound CSV")
+		flagNoInputHeader  = fs.Bool("no-input-header", false, "Source CSV has no header row; columns are named col1, col2, ...")
+		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
+		flagDelim          = fs.String("delim", ",", "Single-character field delimiter (use \\t for tab)")
+		flagTypes          = fs.String("type", "", "Comma-separated column type overrides, e.g. Priority=int,Tags=string")
 	)
 
 	fs.Usage = func() {
@@ -70,7 +71,7 @@ func runCSVImpl(args []string) int {
 
 	t, err := csvbackend.LoadCSV(csvPath, csvbackend.LoadOptions{
 		Delim:     delim,
-		NoHeader:  *flagNoHeader,
+		NoHeader:  *flagNoInputHeader,
 		TypeHints: hints,
 	})
 	if err != nil {
@@ -80,7 +81,8 @@ func runCSVImpl(args []string) int {
 
 	exec := &csvbackend.Executor{
 		Table:              t,
-		Format:             *flagFormat,
+		Mode:               *flagMode,
+		Headers:            !*flagNoOutputHeader,
 		ConfirmDestructive: *flagConfirm,
 		OutputPath:         *flagOutput,
 		Out:                os.Stdout,

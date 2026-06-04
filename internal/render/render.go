@@ -1,6 +1,7 @@
 package render
 
 import (
+	encodingcsv "encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,37 +11,42 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// FormatTable, FormatTSV, FormatJSON are the supported --format values.
+// FormatTable, FormatTSV, FormatCSV, FormatJSON are the supported --mode values.
 const (
 	FormatTable = "table"
 	FormatTSV   = "tsv"
+	FormatCSV   = "csv"
 	FormatJSON  = "json"
 )
 
 // Result is a column-ordered tabular result ready for rendering. Cells hold
 // the raw values returned by Graph (string, float64, bool, nil, ...) so the
-// JSON renderer can preserve types; the table and TSV renderers stringify on
-// the way out.
+// JSON renderer can preserve types; the table, TSV, and CSV renderers
+// stringify on the way out.
 type Result struct {
 	Columns []string
 	Rows    []map[string]any
 }
 
 // Render writes the result to out in the named format. An empty format string
-// auto-detects (table when out is a terminal, TSV otherwise).
-func Render(out io.Writer, r Result, format string) error {
+// auto-detects (table when out is a terminal, TSV otherwise). The headers
+// argument suppresses the header row for the row-shaped formats (table, tsv,
+// csv); JSON ignores it since object keys carry the column names regardless.
+func Render(out io.Writer, r Result, format string, headers bool) error {
 	if format == "" {
 		format = autoFormat(out)
 	}
 	switch format {
 	case FormatTable:
-		return renderTable(out, r)
+		return renderTable(out, r, headers)
 	case FormatTSV:
-		return renderTSV(out, r)
+		return renderTSV(out, r, headers)
+	case FormatCSV:
+		return renderCSV(out, r, headers)
 	case FormatJSON:
 		return renderJSON(out, r)
 	}
-	return fmt.Errorf("unknown format %q (want table, tsv, or json)", format)
+	return fmt.Errorf("unknown mode %q (want table, tsv, csv, or json)", format)
 }
 
 // autoFormat picks table when out is a terminal stdout, TSV otherwise. The
@@ -61,11 +67,11 @@ func autoFormat(out io.Writer) string {
 	return FormatTSV
 }
 
-func renderTable(out io.Writer, r Result) error {
+func renderTable(out io.Writer, r Result, headers bool) error {
 	if len(r.Columns) == 0 {
 		return nil
 	}
-	if err := WriteTableBody(out, r.Columns, r.Rows); err != nil {
+	if err := writeTableBodyHeader(out, r.Columns, r.Rows, headers); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintf(out, "(%d row%s)\n", len(r.Rows), plural(len(r.Rows)))
@@ -73,9 +79,13 @@ func renderTable(out io.Writer, r Result) error {
 }
 
 // WriteTableBody renders the header + separator + data rows, but no footer.
-// Used both by renderTable (which appends the row count) and by Phase F write
-// previews (which append their own "... N more" line).
+// Used by write previews; always shows the header (previews are a labeled
+// snapshot, not a result set the user has flagged headerless).
 func WriteTableBody(out io.Writer, cols []string, rows []map[string]any) error {
+	return writeTableBodyHeader(out, cols, rows, true)
+}
+
+func writeTableBodyHeader(out io.Writer, cols []string, rows []map[string]any, headers bool) error {
 	widths := make([]int, len(cols))
 	for i, c := range cols {
 		widths[i] = runewidth.StringWidth(c)
@@ -91,15 +101,17 @@ func WriteTableBody(out io.Writer, cols []string, rows []map[string]any) error {
 			}
 		}
 	}
-	if err := writeTableRow(out, cols, widths); err != nil {
-		return err
-	}
-	sep := make([]string, len(cols))
-	for i, w := range widths {
-		sep[i] = strings.Repeat("-", w)
-	}
-	if err := writeTableRow(out, sep, widths); err != nil {
-		return err
+	if headers {
+		if err := writeTableRow(out, cols, widths); err != nil {
+			return err
+		}
+		sep := make([]string, len(cols))
+		for i, w := range widths {
+			sep[i] = strings.Repeat("-", w)
+		}
+		if err := writeTableRow(out, sep, widths); err != nil {
+			return err
+		}
 	}
 	for _, row := range cells {
 		if err := writeTableRow(out, row, widths); err != nil {
@@ -118,9 +130,11 @@ func writeTableRow(out io.Writer, cells []string, widths []int) error {
 	return err
 }
 
-func renderTSV(out io.Writer, r Result) error {
-	if _, err := fmt.Fprintln(out, strings.Join(r.Columns, "\t")); err != nil {
-		return err
+func renderTSV(out io.Writer, r Result, headers bool) error {
+	if headers {
+		if _, err := fmt.Fprintln(out, strings.Join(r.Columns, "\t")); err != nil {
+			return err
+		}
 	}
 	for _, row := range r.Rows {
 		cells := make([]string, len(r.Columns))
@@ -132,6 +146,30 @@ func renderTSV(out io.Writer, r Result) error {
 		}
 	}
 	return nil
+}
+
+// renderCSV emits RFC 4180 CSV: comma-delimited, CRLF line endings, fields
+// containing commas, quotes, or newlines are double-quoted (the stdlib writer
+// handles the quoting rules). Headers off skips the column-name row.
+func renderCSV(out io.Writer, r Result, headers bool) error {
+	w := encodingcsv.NewWriter(out)
+	w.UseCRLF = true
+	if headers {
+		if err := w.Write(r.Columns); err != nil {
+			return err
+		}
+	}
+	for _, row := range r.Rows {
+		cells := make([]string, len(r.Columns))
+		for i, c := range r.Columns {
+			cells[i] = stringify(row[c])
+		}
+		if err := w.Write(cells); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	return w.Error()
 }
 
 func renderJSON(out io.Writer, r Result) error {

@@ -22,7 +22,7 @@ func (e *Executor) Describe(w io.Writer) error {
 	return render.Render(w, render.Result{
 		Columns: []string{"name", "type"},
 		Rows:    rows,
-	}, e.Format)
+	}, e.Mode, true)
 }
 
 // Refresh re-reads the bound CSV from disk. Dialect (delimiter, header

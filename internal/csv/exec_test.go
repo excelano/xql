@@ -87,7 +87,7 @@ func newExec(t *testing.T) (*Executor, *bytes.Buffer, string) {
 		t.Fatal(err)
 	}
 	buf := &bytes.Buffer{}
-	return &Executor{Table: tbl, Format: "tsv", Out: buf}, buf, path
+	return &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}, buf, path
 }
 
 func TestExecSelectStar(t *testing.T) {
@@ -477,7 +477,7 @@ func TestExecSelectAggregateFloatColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := &bytes.Buffer{}
-	e := &Executor{Table: tbl, Format: "tsv", Out: buf}
+	e := &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}
 	stmt, err := parse.Parse("SELECT SUM(Discount), AVG(Discount)")
 	if err != nil {
 		t.Fatal(err)
@@ -964,7 +964,7 @@ func TestExecSelectDistinctNullsCollapse(t *testing.T) {
 		HasHeader: true,
 	}
 	buf := &bytes.Buffer{}
-	e := &Executor{Table: tbl, Format: "tsv", Out: buf}
+	e := &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}
 	stmt, err := parse.Parse("SELECT DISTINCT Priority")
 	if err != nil {
 		t.Fatal(err)

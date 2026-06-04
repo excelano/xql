@@ -24,12 +24,13 @@ func runSPImpl(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagList      = fs.String("list", "", "SharePoint list URL (required)")
-		flagExec      = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
-		flagFormat    = fs.String("format", "", "Output format: table | tsv | json (auto-detected if blank)")
-		flagCommit    = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
-		flagAllFields = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
-		flagConfirm   = fs.Bool("confirm-destructive", false, "Required for bare DELETE (no WHERE) in --exec mode")
+		flagList           = fs.String("list", "", "SharePoint list URL (required)")
+		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
+		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
+		flagAllFields      = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
+		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE (no WHERE) in --exec mode")
+		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 	)
 
 	fs.Usage = func() {
@@ -82,7 +83,8 @@ func runSPImpl(args []string) int {
 	exec := &sp.Executor{
 		Graph:              graph,
 		Bound:              bound,
-		Format:             *flagFormat,
+		Mode:               *flagMode,
+		Headers:            !*flagNoOutputHeader,
 		AllFields:          *flagAllFields,
 		ConfirmDestructive: *flagConfirm,
 		Out:                os.Stdout,

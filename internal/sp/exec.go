@@ -28,7 +28,8 @@ import (
 type Executor struct {
 	Graph              *GraphClient
 	Bound              *BoundList
-	Format             string
+	Mode               string
+	Headers            bool
 	AllFields          bool
 	ConfirmDestructive bool
 	Confirm            func() bool
@@ -143,7 +144,7 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 		rows = relabelRows(rows, plan)
 	}
 
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Format)
+	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
 }
 
 // relabelRows builds new per-row maps keyed by the projection's output label,
@@ -470,7 +471,7 @@ func (e *Executor) executeImplicitAggregation(ctx context.Context, sel *parse.Se
 	if err != nil {
 		return err
 	}
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Format)
+	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
 }
 
 // aggregateOneRow runs the aggregate slots over every row in tbl, then
@@ -570,7 +571,7 @@ func (e *Executor) executeGroupedAggregation(ctx context.Context, sel *parse.Sel
 	if err != nil {
 		return err
 	}
-	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Format)
+	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Mode, e.Headers)
 }
 
 // aggregateGrouped is the pure, testable core of the grouped-aggregation
