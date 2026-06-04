@@ -50,7 +50,7 @@ func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error
 	case *parse.Comparison:
 		col, ok := columnExprName(n.LExpr)
 		if !ok {
-			return "", fmt.Errorf("arithmetic in WHERE comparisons: SharePoint backend support lands in a later v1.1 slice")
+			return "", fmt.Errorf("arithmetic on a column reference in WHERE is not supported by SharePoint: OData $filter has no equivalent operator. Rewrite by computing the literal side yourself (e.g. WHERE Priority + 1 = 5 → WHERE Priority = 4)")
 		}
 		field, ok := schema[col]
 		if !ok {

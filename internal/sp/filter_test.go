@@ -261,9 +261,9 @@ func TestToOData(t *testing.T) {
 			wantErr: "ISO 8601 datetime",
 		},
 		{
-			name:    "arithmetic LHS rejected with slice pointer",
+			name:    "arithmetic LHS permanently rejected with rewrite hint",
 			pred:    cmpE(&parse.BinaryExpr{Op: "+", L: &parse.ColumnExpr{Name: "Priority"}, R: &parse.LiteralExpr{Value: vnum("1")}}, "=", vnum("3")),
-			wantErr: "v1.1 slice",
+			wantErr: "Rewrite by computing the literal side",
 		},
 	}
 
@@ -297,6 +297,29 @@ func TestToODataNil(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("nil predicate should produce empty string, got %q", got)
+	}
+}
+
+// TestArithmeticWHERERejection confirms the full parse-then-translate path
+// surfaces the permanent rejection with its rewrite hint. Pass 3 slice B
+// settled this as a permanent rejection: OData $filter has no arithmetic
+// operator on field references, and falling back to a client-side full-fetch
+// would defeat the point of server-side filtering on large lists.
+func TestArithmeticWHERERejection(t *testing.T) {
+	schema := testSchema()
+	stmt, err := parse.Parse("SELECT * WHERE Priority + 1 = 5")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	sel := stmt.(*parse.SelectStmt)
+	_, err = ToOData(sel.Where, schema)
+	if err == nil {
+		t.Fatal("expected error for arithmetic WHERE, got nil")
+	}
+	for _, want := range []string{"arithmetic", "not supported by SharePoint", "Rewrite", "Priority = 4"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
