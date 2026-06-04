@@ -641,3 +641,212 @@ func TestEvalCellToFieldJSON(t *testing.T) {
 		})
 	}
 }
+
+// projTestExecutor builds a minimal Executor with a fixed two-column schema
+// so resolveProjection can be exercised without a live Graph client.
+func projTestExecutor(allFields bool) *Executor {
+	return &Executor{
+		Bound: &BoundList{
+			Columns: []string{"Title", "Count"},
+			Schema: map[string]FieldInfo{
+				"Title": {Name: "Title", Type: FieldText},
+				"Count": {Name: "Count", Type: FieldNumber},
+			},
+		},
+		AllFields: allFields,
+	}
+}
+
+// projTestExecutorWithHidden adds a hidden column so SELECT * filtering can
+// be checked.
+func projTestExecutorWithHidden(allFields bool) *Executor {
+	return &Executor{
+		Bound: &BoundList{
+			Columns: []string{"Title", "Internal"},
+			Schema: map[string]FieldInfo{
+				"Title":    {Name: "Title", Type: FieldText},
+				"Internal": {Name: "Internal", Type: FieldText, Hidden: true},
+			},
+		},
+		AllFields: allFields,
+	}
+}
+
+func TestResolveProjectionStar(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{Star: true}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan) != 2 {
+		t.Fatalf("got %d entries, want 2", len(plan))
+	}
+	for i, want := range []string{"Title", "Count"} {
+		if plan[i].Source != want || plan[i].Label != want {
+			t.Errorf("plan[%d] = %+v, want Source=Label=%q", i, plan[i], want)
+		}
+	}
+}
+
+func TestResolveProjectionStarHidesHiddenByDefault(t *testing.T) {
+	e := projTestExecutorWithHidden(false)
+	plan, err := e.resolveProjection(&parse.SelectStmt{Star: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan) != 1 || plan[0].Source != "Title" {
+		t.Errorf("plan = %+v, want only Title", plan)
+	}
+}
+
+func TestResolveProjectionStarAllFields(t *testing.T) {
+	e := projTestExecutorWithHidden(true)
+	plan, err := e.resolveProjection(&parse.SelectStmt{Star: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan) != 2 {
+		t.Errorf("plan = %+v, want both columns including hidden", plan)
+	}
+}
+
+func TestResolveProjectionBareColumnLabelEqualsSource(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: &parse.ColumnExpr{Name: "Title"}},
+			{Expr: &parse.ColumnExpr{Name: "Count"}},
+		},
+	}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i, want := range []string{"Title", "Count"} {
+		if plan[i].Source != want || plan[i].Label != want {
+			t.Errorf("plan[%d] = %+v, want Source=Label=%q", i, plan[i], want)
+		}
+	}
+}
+
+func TestResolveProjectionAliasRenamesLabel(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: &parse.ColumnExpr{Name: "Title"}, Alias: "T"},
+			{Expr: &parse.ColumnExpr{Name: "Count"}, Alias: "N"},
+		},
+	}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan[0].Source != "Title" || plan[0].Label != "T" {
+		t.Errorf("plan[0] = %+v, want Source=Title Label=T", plan[0])
+	}
+	if plan[1].Source != "Count" || plan[1].Label != "N" {
+		t.Errorf("plan[1] = %+v, want Source=Count Label=N", plan[1])
+	}
+}
+
+func TestResolveProjectionAliasMixedWithBare(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: &parse.ColumnExpr{Name: "Title"}, Alias: "Subject"},
+			{Expr: &parse.ColumnExpr{Name: "Count"}},
+		},
+	}
+	plan, err := e.resolveProjection(sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan[0].Label != "Subject" || plan[1].Label != "Count" {
+		t.Errorf("plan = %+v, want labels Subject/Count", plan)
+	}
+}
+
+func TestResolveProjectionRejectsDuplicateLabels(t *testing.T) {
+	e := projTestExecutor(false)
+	cases := []struct {
+		name string
+		sel  *parse.SelectStmt
+		want string
+	}{
+		{
+			"two aliases collide",
+			&parse.SelectStmt{Columns: []parse.Projection{
+				{Expr: &parse.ColumnExpr{Name: "Title"}, Alias: "X"},
+				{Expr: &parse.ColumnExpr{Name: "Count"}, Alias: "X"},
+			}},
+			`duplicate output column "X"`,
+		},
+		{
+			"alias collides with bare column name",
+			&parse.SelectStmt{Columns: []parse.Projection{
+				{Expr: &parse.ColumnExpr{Name: "Title"}},
+				{Expr: &parse.ColumnExpr{Name: "Count"}, Alias: "Title"},
+			}},
+			`duplicate output column "Title"`,
+		},
+		{
+			"same column twice",
+			&parse.SelectStmt{Columns: []parse.Projection{
+				{Expr: &parse.ColumnExpr{Name: "Title"}},
+				{Expr: &parse.ColumnExpr{Name: "Title"}},
+			}},
+			`duplicate output column "Title"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := e.resolveProjection(tc.sel)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %q, want substring %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveProjectionAliasUnknownSourceColumn(t *testing.T) {
+	e := projTestExecutor(false)
+	sel := &parse.SelectStmt{Columns: []parse.Projection{
+		{Expr: &parse.ColumnExpr{Name: "NotAColumn"}, Alias: "X"},
+	}}
+	_, err := e.resolveProjection(sel)
+	if err == nil || !strings.Contains(err.Error(), `unknown column "NotAColumn"`) {
+		t.Errorf("got %v, want unknown column error", err)
+	}
+}
+
+func TestRelabelRows(t *testing.T) {
+	plan := []projEntry{
+		{Source: "Title", Label: "T"},
+		{Source: "Count", Label: "Count"},
+	}
+	rows := []map[string]any{
+		{"Title": "alpha", "Count": float64(1), "Extra": "ignored"},
+		{"Title": "beta", "Count": float64(2)},
+		{"Count": float64(3)}, // missing Title → nil under "T"
+	}
+	got := relabelRows(rows, plan)
+	if len(got) != 3 {
+		t.Fatalf("got %d rows, want 3", len(got))
+	}
+	if got[0]["T"] != "alpha" || got[0]["Count"] != float64(1) {
+		t.Errorf("row 0 = %+v", got[0])
+	}
+	if _, hasExtra := got[0]["Extra"]; hasExtra {
+		t.Error("row 0 leaked Extra into relabeled output")
+	}
+	if _, hasSource := got[0]["Title"]; hasSource {
+		t.Error("row 0 leaked source key Title")
+	}
+	if got[2]["T"] != nil {
+		t.Errorf("row 2 missing source key should map to nil, got %v", got[2]["T"])
+	}
+}

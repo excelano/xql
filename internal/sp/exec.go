@@ -59,12 +59,23 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 	if sel.Having != nil {
 		return fmt.Errorf("HAVING: SharePoint backend support lands in a later v1.1 slice")
 	}
-	cols, err := e.resolveProjection(sel)
+	plan, err := e.resolveProjection(sel)
 	if err != nil {
 		return err
 	}
 	if err := e.validateOrderBy(sel.OrderBy); err != nil {
 		return err
+	}
+
+	sourceCols := make([]string, len(plan))
+	labelCols := make([]string, len(plan))
+	renamed := false
+	for i, p := range plan {
+		sourceCols[i] = p.Source
+		labelCols[i] = p.Label
+		if p.Source != p.Label {
+			renamed = true
+		}
 	}
 
 	q := url.Values{
@@ -100,7 +111,7 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 			item.Fields = map[string]any{}
 		}
 		if sel.Distinct {
-			key := distinctKey(item.Fields, cols)
+			key := distinctKey(item.Fields, sourceCols)
 			if _, dup := seen[key]; dup {
 				continue
 			}
@@ -114,7 +125,27 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 	}
 	rows = applyOffsetLimit(rows, sel.Offset, sel.Limit)
 
-	return render.Render(e.Out, render.Result{Columns: cols, Rows: rows}, e.Format)
+	if renamed {
+		rows = relabelRows(rows, plan)
+	}
+
+	return render.Render(e.Out, render.Result{Columns: labelCols, Rows: rows}, e.Format)
+}
+
+// relabelRows builds new per-row maps keyed by the projection's output label,
+// pulling each value from the source column. Used when AS aliases (or any
+// future expression with a synthetic label) make the renderer's column keys
+// differ from the field names returned by Graph.
+func relabelRows(rows []map[string]any, plan []projEntry) []map[string]any {
+	out := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		m := make(map[string]any, len(plan))
+		for _, p := range plan {
+			m[p.Label] = row[p.Source]
+		}
+		out[i] = m
+	}
+	return out
 }
 
 // validateOrderBy rejects sort keys that don't name a known schema column.
@@ -259,30 +290,42 @@ func distinctKey(fields map[string]any, cols []string) string {
 	return b.String()
 }
 
+// projEntry is one entry in the SELECT projection plan. Source is the
+// SharePoint field name the value comes from; Label is the output column
+// name shown in headers and used as the row-map key at render time. For a
+// bare column reference without AS, the two are equal.
+//
+// Slices E–G will grow this struct (Expr for computed/aggregate projections,
+// Type for typed rendering); slice D keeps it intentionally minimal.
+type projEntry struct {
+	Source string
+	Label  string
+}
+
 // resolveProjection decides which columns to return. SELECT * uses every
 // non-hidden column in schema order (or every column when AllFields is set).
 // An explicit column list is validated against the schema; unknown columns
-// produce a clear error.
+// produce a clear error. AS aliases rename the output header without
+// affecting the underlying Graph fetch.
 //
-// v2 grammar shapes (AS aliases, computed expressions, aggregates) parse
-// successfully but error here until the corresponding Pass 3 slice lands.
-func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]string, error) {
+// v2 grammar shapes still unsupported (aggregates, arithmetic projections)
+// parse successfully but error here until the corresponding Pass 3 slice
+// lands.
+func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error) {
 	if sel.Star {
-		out := make([]string, 0, len(e.Bound.Columns))
+		out := make([]projEntry, 0, len(e.Bound.Columns))
 		for _, name := range e.Bound.Columns {
 			info := e.Bound.Schema[name]
 			if !e.AllFields && info.Hidden {
 				continue
 			}
-			out = append(out, name)
+			out = append(out, projEntry{Source: name, Label: name})
 		}
 		return out, nil
 	}
-	cols := make([]string, 0, len(sel.Columns))
+	plan := make([]projEntry, 0, len(sel.Columns))
+	seen := make(map[string]struct{}, len(sel.Columns))
 	for _, pr := range sel.Columns {
-		if pr.Alias != "" {
-			return nil, fmt.Errorf("AS aliases: SharePoint backend support lands in a later v1.1 slice")
-		}
 		if _, isAgg := pr.Expr.(*parse.AggregateExpr); isAgg {
 			return nil, fmt.Errorf("aggregate expressions: SharePoint backend support lands in a later v1.1 slice")
 		}
@@ -293,9 +336,17 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]string, error) {
 		if _, ok := e.Bound.Schema[name]; !ok {
 			return nil, fmt.Errorf("unknown column %q (not in list schema)", name)
 		}
-		cols = append(cols, name)
+		label := pr.Alias
+		if label == "" {
+			label = name
+		}
+		if _, dup := seen[label]; dup {
+			return nil, fmt.Errorf("duplicate output column %q; use AS to give them distinct names", label)
+		}
+		seen[label] = struct{}{}
+		plan = append(plan, projEntry{Source: name, Label: label})
 	}
-	return cols, nil
+	return plan, nil
 }
 
 // executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments
