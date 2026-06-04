@@ -1618,3 +1618,301 @@ func TestHavingWithoutAggOrGroupReportsError(t *testing.T) {
 		t.Fatal("test setup: plan should be non-aggregated")
 	}
 }
+
+func TestResolveOrderByOutputByLabel(t *testing.T) {
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	keys := []parse.OrderKey{{Column: "n", Desc: true}}
+	got, err := resolveOrderByOutput(keys, plan)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Label != "n" || got[0].Type != cell.TypeInt || !got[0].Desc {
+		t.Errorf("got %+v, want one entry Label=n Type=int Desc=true", got)
+	}
+}
+
+func TestResolveOrderByOutputAggregateDefaultLabel(t *testing.T) {
+	plan := []projEntry{
+		{Label: "COUNT(*)", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	keys := []parse.OrderKey{{Column: "COUNT(*)"}}
+	got, err := resolveOrderByOutput(keys, plan)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Label != "COUNT(*)" {
+		t.Errorf("got %+v, want one entry for COUNT(*)", got)
+	}
+}
+
+func TestResolveOrderByOutputUnknownLabel(t *testing.T) {
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+	}
+	keys := []parse.OrderKey{{Column: "Nope"}}
+	_, err := resolveOrderByOutput(keys, plan)
+	if err == nil || !strings.Contains(err.Error(), `unknown column "Nope" in ORDER BY`) {
+		t.Errorf("got %v, want unknown-label error", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "SELECT list") {
+		t.Errorf("error %q should hint at SELECT list", err.Error())
+	}
+}
+
+func TestCompareOutputValueInt(t *testing.T) {
+	cases := []struct {
+		a, b any
+		want int // sign only
+	}{
+		{int64(1), int64(2), -1},
+		{int64(5), int64(5), 0},
+		{int64(7), int64(3), +1},
+	}
+	for _, tc := range cases {
+		got := compareOutputValue(tc.a, tc.b, cell.TypeInt)
+		if (got < 0) != (tc.want < 0) || (got > 0) != (tc.want > 0) || (got == 0) != (tc.want == 0) {
+			t.Errorf("compareOutputValue(%v, %v, int) = %d, want sign %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestCompareOutputValueFloat(t *testing.T) {
+	if compareOutputValue(float64(1.5), float64(2.5), cell.TypeFloat) >= 0 {
+		t.Error("1.5 < 2.5 expected")
+	}
+	if compareOutputValue(float64(3.0), float64(3.0), cell.TypeFloat) != 0 {
+		t.Error("3.0 == 3.0 expected")
+	}
+}
+
+func TestCompareOutputValueBool(t *testing.T) {
+	if compareOutputValue(false, true, cell.TypeBool) >= 0 {
+		t.Error("false < true expected")
+	}
+	if compareOutputValue(true, true, cell.TypeBool) != 0 {
+		t.Error("true == true expected")
+	}
+}
+
+func TestCompareOutputValueString(t *testing.T) {
+	if compareOutputValue("alpha", "beta", cell.TypeString) >= 0 {
+		t.Error("alpha < beta expected")
+	}
+}
+
+func TestCompareOutputValueNullsHigh(t *testing.T) {
+	if compareOutputValue(nil, nil, cell.TypeInt) != 0 {
+		t.Error("nil == nil expected")
+	}
+	if compareOutputValue(nil, int64(1), cell.TypeInt) <= 0 {
+		t.Error("nil sorts above int64(1) expected")
+	}
+	if compareOutputValue(int64(1), nil, cell.TypeInt) >= 0 {
+		t.Error("int64(1) sorts below nil expected")
+	}
+}
+
+func TestSortOutputRowsAsc(t *testing.T) {
+	rows := []map[string]any{
+		{"n": int64(3)},
+		{"n": int64(1)},
+		{"n": int64(2)},
+	}
+	order := []outOrderEntry{{Label: "n", Type: cell.TypeInt}}
+	sortOutputRows(rows, order)
+	want := []int64{1, 2, 3}
+	for i, w := range want {
+		if rows[i]["n"] != w {
+			t.Errorf("row %d = %v, want %d", i, rows[i]["n"], w)
+		}
+	}
+}
+
+func TestSortOutputRowsDesc(t *testing.T) {
+	rows := []map[string]any{
+		{"n": int64(1)},
+		{"n": int64(3)},
+		{"n": int64(2)},
+	}
+	order := []outOrderEntry{{Label: "n", Type: cell.TypeInt, Desc: true}}
+	sortOutputRows(rows, order)
+	want := []int64{3, 2, 1}
+	for i, w := range want {
+		if rows[i]["n"] != w {
+			t.Errorf("row %d = %v, want %d", i, rows[i]["n"], w)
+		}
+	}
+}
+
+func TestSortOutputRowsMultiKey(t *testing.T) {
+	rows := []map[string]any{
+		{"Status": "Open", "n": int64(2)},
+		{"Status": "Done", "n": int64(1)},
+		{"Status": "Open", "n": int64(5)},
+		{"Status": "Done", "n": int64(3)},
+	}
+	order := []outOrderEntry{
+		{Label: "Status", Type: cell.TypeString},
+		{Label: "n", Type: cell.TypeInt, Desc: true},
+	}
+	sortOutputRows(rows, order)
+	// ASC Status: Done first, then Open. Within each, DESC n.
+	wantStatus := []string{"Done", "Done", "Open", "Open"}
+	wantN := []int64{3, 1, 5, 2}
+	for i := range rows {
+		if rows[i]["Status"] != wantStatus[i] || rows[i]["n"] != wantN[i] {
+			t.Errorf("row %d = %+v, want Status=%s n=%d", i, rows[i], wantStatus[i], wantN[i])
+		}
+	}
+}
+
+func TestSortOutputRowsNullsHigh(t *testing.T) {
+	rows := []map[string]any{
+		{"n": int64(2)},
+		{"n": nil},
+		{"n": int64(1)},
+	}
+	order := []outOrderEntry{{Label: "n", Type: cell.TypeInt}}
+	sortOutputRows(rows, order)
+	// ASC: 1, 2, NULL.
+	want := []any{int64(1), int64(2), nil}
+	for i, w := range want {
+		if rows[i]["n"] != w {
+			t.Errorf("ASC row %d = %v, want %v", i, rows[i]["n"], w)
+		}
+	}
+	// DESC: NULL, 2, 1.
+	order[0].Desc = true
+	sortOutputRows(rows, order)
+	wantDesc := []any{nil, int64(2), int64(1)}
+	for i, w := range wantDesc {
+		if rows[i]["n"] != w {
+			t.Errorf("DESC row %d = %v, want %v", i, rows[i]["n"], w)
+		}
+	}
+}
+
+func TestAggregateGroupedOrderByAggregateDesc(t *testing.T) {
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	sel := &parse.SelectStmt{
+		GroupBy: []string{"Status"},
+		OrderBy: []parse.OrderKey{{Column: "n", Desc: true}},
+	}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d groups, want 2", len(rows))
+	}
+	// Open has 3 rows, Done has 2; DESC n puts Open first.
+	if rows[0]["Status"] != "Open" || rows[1]["Status"] != "Done" {
+		t.Errorf("order = %v/%v, want Open/Done", rows[0]["Status"], rows[1]["Status"])
+	}
+}
+
+func TestAggregateGroupedOrderByGroupColumnAsc(t *testing.T) {
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	sel := &parse.SelectStmt{
+		GroupBy: []string{"Status"},
+		OrderBy: []parse.OrderKey{{Column: "Status"}},
+	}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ASC Status: Done, Open (alphabetical).
+	if rows[0]["Status"] != "Done" || rows[1]["Status"] != "Open" {
+		t.Errorf("ASC Status = %v/%v, want Done/Open", rows[0]["Status"], rows[1]["Status"])
+	}
+}
+
+func TestAggregateGroupedOrderByAlias(t *testing.T) {
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "s", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "total", Expr: aggExpr("SUM", "Count"), Type: cell.TypeFloat},
+	}
+	sel := &parse.SelectStmt{
+		GroupBy: []string{"Status"},
+		OrderBy: []parse.OrderKey{{Column: "total"}},
+	}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// SUM(Count) for Open = 3, for Done = 7. ASC → Open, Done.
+	if rows[0]["s"] != "Open" || rows[1]["s"] != "Done" {
+		t.Errorf("order by alias 'total' ASC = %v/%v, want Open/Done", rows[0]["s"], rows[1]["s"])
+	}
+}
+
+func TestAggregateGroupedOrderByThenLimit(t *testing.T) {
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	one := 1
+	sel := &parse.SelectStmt{
+		GroupBy: []string{"Status"},
+		OrderBy: []parse.OrderKey{{Column: "n", Desc: true}},
+		Limit:   &one,
+	}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Sort first (Open has higher count), then LIMIT 1 picks the top row.
+	if len(rows) != 1 || rows[0]["Status"] != "Open" {
+		t.Errorf("ORDER BY n DESC LIMIT 1 should pick Open, got %+v", rows)
+	}
+}
+
+func TestAggregateGroupedOrderByUnknownLabel(t *testing.T) {
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	sel := &parse.SelectStmt{
+		GroupBy: []string{"Status"},
+		OrderBy: []parse.OrderKey{{Column: "Nope"}},
+	}
+	_, _, err := aggregateGrouped(tbl, plan, sel)
+	if err == nil || !strings.Contains(err.Error(), `unknown column "Nope" in ORDER BY`) {
+		t.Errorf("got %v, want unknown-label error", err)
+	}
+}
+
+func TestAggregateGroupedOrderByAfterDistinct(t *testing.T) {
+	// DISTINCT then ORDER BY: literal-projection groups collapse to one row,
+	// so the sort sees a single row and applyOffsetLimit passes it through.
+	tbl := groupTestTable()
+	plan := []projEntry{
+		{Label: "one", Expr: litE(vnum("1")), Type: cell.TypeInt},
+	}
+	sel := &parse.SelectStmt{
+		GroupBy:  []string{"Status"},
+		Distinct: true,
+		OrderBy:  []parse.OrderKey{{Column: "one"}},
+	}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["one"] != int64(1) {
+		t.Errorf("DISTINCT + ORDER BY = %+v, want one row {one: 1}", rows)
+	}
+}

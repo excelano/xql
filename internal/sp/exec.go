@@ -64,7 +64,13 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 	}
 	if aggregated {
 		if len(sel.OrderBy) > 0 {
-			return fmt.Errorf("ORDER BY on aggregated queries: SharePoint backend support lands in a later v1.1 slice")
+			// Resolve here so unknown-label errors surface before any Graph
+			// fetch. aggregateGrouped re-resolves to drive its sort; for the
+			// implicit-aggregation path, one row makes the sort a no-op but
+			// validation still runs.
+			if _, err := resolveOrderByOutput(sel.OrderBy, plan); err != nil {
+				return err
+			}
 		}
 		if grouped {
 			return e.executeGroupedAggregation(ctx, sel, plan)
@@ -674,6 +680,17 @@ func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) 
 		rowsOut = out
 	}
 
+	// ORDER BY runs after DISTINCT and before OFFSET/LIMIT, the standard SQL
+	// pipeline position. Sort keys are resolved against the projection's
+	// output labels; the source schema is unreachable after aggregation.
+	if len(sel.OrderBy) > 0 {
+		order, err := resolveOrderByOutput(sel.OrderBy, plan)
+		if err != nil {
+			return nil, nil, err
+		}
+		sortOutputRows(rowsOut, order)
+	}
+
 	rowsOut = applyOffsetLimit(rowsOut, sel.Offset, sel.Limit)
 	return labelCols, rowsOut, nil
 }
@@ -792,6 +809,120 @@ func groupKey(row cell.Row, idx []int, types []cell.ColumnType) (string, []cell.
 		}
 	}
 	return b.String(), cells
+}
+
+// outOrderEntry is one resolved ORDER BY key bound to a projection-plan
+// label. Aggregated output rows are keyed by Label in the renderer's map,
+// so the sort comparator reads each row's value directly via Label rather
+// than by positional index.
+type outOrderEntry struct {
+	Label string
+	Type  cell.ColumnType
+	Desc  bool
+}
+
+// resolveOrderByOutput maps each ORDER BY key to a projection-plan slot by
+// label match. Aggregated queries can't reach source columns after
+// projection; every sort key must therefore live in the SELECT list,
+// either under an explicit alias or under the rendered source text of an
+// unaliased projection.
+//
+// Copied from internal/csv/exec.go per the copy-and-diff convention.
+func resolveOrderByOutput(keys []parse.OrderKey, plan []projEntry) ([]outOrderEntry, error) {
+	out := make([]outOrderEntry, len(keys))
+	for i, k := range keys {
+		idx := -1
+		for j, p := range plan {
+			if p.Label == k.Column {
+				idx = j
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, fmt.Errorf("unknown column %q in ORDER BY; aggregated queries must sort on a column in the SELECT list", k.Column)
+		}
+		out[i] = outOrderEntry{Label: plan[idx].Label, Type: plan[idx].Type, Desc: k.Desc}
+	}
+	return out, nil
+}
+
+// sortOutputRows stable-sorts projected output rows by the resolved
+// ORDER BY plan. NULLs sort to the high end (last in ASC, first in DESC),
+// matching the SP backend's source-row sort and the Postgres convention.
+func sortOutputRows(rows []map[string]any, order []outOrderEntry) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		for _, k := range order {
+			cmp := compareOutputValue(rows[i][k.Label], rows[j][k.Label], k.Type)
+			if k.Desc {
+				cmp = -cmp
+			}
+			if cmp != 0 {
+				return cmp < 0
+			}
+		}
+		return false
+	})
+}
+
+// compareOutputValue compares two projected output values for ORDER BY.
+// Values are the Go scalars produced by cell.AsAny (int64, float64, bool,
+// string, nil); the type comes from the projection plan, so the comparator
+// can pick the right branch without re-inspecting the runtime shape. NULL
+// (nil) sorts to the high end. The string fallback covers TypeDate (whose
+// AsAny renders as an ISO 8601 string that sorts chronologically) and any
+// type the typed branches can't satisfy.
+func compareOutputValue(a, b any, t cell.ColumnType) int {
+	aNil := a == nil
+	bNil := b == nil
+	if aNil && bNil {
+		return 0
+	}
+	if aNil {
+		return 1
+	}
+	if bNil {
+		return -1
+	}
+	switch t {
+	case cell.TypeInt:
+		ai, aok := a.(int64)
+		bi, bok := b.(int64)
+		if aok && bok {
+			switch {
+			case ai < bi:
+				return -1
+			case ai > bi:
+				return 1
+			}
+			return 0
+		}
+	case cell.TypeFloat:
+		af, aok := a.(float64)
+		bf, bok := b.(float64)
+		if aok && bok {
+			switch {
+			case af < bf:
+				return -1
+			case af > bf:
+				return 1
+			}
+			return 0
+		}
+	case cell.TypeBool:
+		ab, aok := a.(bool)
+		bb, bok := b.(bool)
+		if aok && bok {
+			ai, bi := 0, 0
+			if ab {
+				ai = 1
+			}
+			if bb {
+				bi = 1
+			}
+			return ai - bi
+		}
+	}
+	return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
 }
 
 // executeUpdate runs UPDATE SET ... [WHERE ...]. Always validates assignments
