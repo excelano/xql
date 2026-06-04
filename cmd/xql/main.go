@@ -105,20 +105,8 @@ func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "  xql sp  --help")
 }
 
-// runCSV delegates to runCSVImpl in csv.go. Kept as a thin shim so the
-// Backend table's function value stays a stable identifier.
+// runCSV delegates to runCSVImpl in csv.go and runSP delegates to runSPImpl
+// in sp.go. Thin shims so the Backend table's function values stay stable
+// identifiers (the backend bodies live with the rest of their flag parsing).
 func runCSV(args []string) int { return runCSVImpl(args) }
-
-func runSP(args []string) int {
-	if len(args) > 0 {
-		switch args[0] {
-		case "-h", "--help":
-			fmt.Println("xql sp [flags]")
-			fmt.Println()
-			fmt.Println("SharePoint backend — not yet wired in this slice.")
-			return 0
-		}
-	}
-	fmt.Fprintln(os.Stderr, "xql sp: backend not yet implemented (slice 1 scaffold).")
-	return 1
-}
+func runSP(args []string) int  { return runSPImpl(args) }
