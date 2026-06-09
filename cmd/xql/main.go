@@ -52,7 +52,7 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 	case "-h", "--help", "help":
 		printUsage(stdout, reg)
 		return 0
-	case "--version":
+	case "-V", "--version":
 		fmt.Fprintln(stdout, version)
 		return 0
 	}
@@ -82,7 +82,8 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 	return 2
 }
 
-const version = "0.0.0-dev"
+// Stamped at build time via -ldflags by goreleaser.
+var version = "(devel)"
 
 func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "xql — Excelano Query Language CLI")
