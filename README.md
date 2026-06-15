@@ -174,7 +174,7 @@ History persists at `~/.config/xql/history-sp`. The list URL can be the bare lis
 
 ## Security
 
-`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process.
+`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
 
 ## License
 

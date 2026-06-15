@@ -18,6 +18,8 @@ The CSV backend (`xql csv`) reads the file you point it at, holds it in memory f
 
 The SharePoint backend (`xql sp`) calls Microsoft Graph over HTTPS to read and write items in a single bound SharePoint list. Authentication is delegated device-code OAuth against your Microsoft Entra ID account; the scope requested is `Sites.ReadWrite.All`. xql cannot access any data your account cannot already access in SharePoint Online. No other Graph endpoints are touched.
 
+IT administrators evaluating the SharePoint backend for a Microsoft 365 tenant will find the application's registration details, the delegated-permission risk profile, and the consent and revocation steps in [ADMINS.md](ADMINS.md).
+
 ## What xql stores
 
 xql stores REPL command history at `~/.config/xql/history-csv` and `~/.config/xql/history-sp` with file mode 0600 (directory mode 0700). The SharePoint backend additionally caches a refresh token at `~/.config/xql/sp-token.json` (mode 0600) so subsequent runs reauthenticate without another device-code prompt. Delete that file to force re-authentication; revoke the granted permission at https://myaccount.microsoft.com/applications to invalidate the token server-side. There is no telemetry, no analytics, and no remote logging.
