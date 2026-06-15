@@ -20,10 +20,11 @@ import (
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
 )
 
-// Excelano's published App Registration (originally created for spsql; reused
-// here so existing consenters don't see a re-consent prompt). To use your own
-// registration instead, change this constant and rebuild — see SELF-HOSTING.md
-// in the xql repo (forthcoming).
+// Azure app registration "Excelano SharePoint tools (xql, xftp)"
+// (client 13be0775-ed76-4407-bb2c-b7a07a189bf6), multi-tenant, in Excelano's
+// tenant. Shared by xql and xftp so consent state carries across both tools.
+// To use your own registration instead, change this constant and rebuild —
+// see SELF-HOSTING.md in the xql repo (forthcoming).
 const (
 	defaultClientID  = "13be0775-ed76-4407-bb2c-b7a07a189bf6"
 	defaultAuthority = "https://login.microsoftonline.com/common"
