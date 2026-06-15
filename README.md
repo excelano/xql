@@ -157,7 +157,7 @@ A few inference behaviors are worth knowing:
 ### SharePoint backend
 
 ```
-xql sp --list https://contoso.sharepoint.com/sites/team/Lists/Tasks
+xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks
 ```
 
 The SharePoint backend binds to a single list and runs the same SQL grammar against it via Microsoft Graph. Authentication is device-code OAuth: the first run prints a short code and a URL to enter it at, and a refresh token is cached at `~/.config/xql/sp-token.json` (file mode 0600) so subsequent runs reauthenticate silently. The cached token is per-account; it carries `Sites.ReadWrite.All` delegated permission.

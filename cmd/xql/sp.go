@@ -13,18 +13,13 @@ import (
 )
 
 // runSPImpl is the SharePoint-backend entry point. The dispatcher hands us
-// argv stripped of "xql sp" — so args[0] is the first user-supplied token.
-//
-// Slice 1 wired --list. Slice 2 added --exec / --format / --all-fields for
-// one-shot SELECT. Slice 3 added --commit / --confirm-destructive for
-// UPDATE/DELETE/INSERT with dry-run preview. Slice 4 wires the interactive
-// REPL when --exec is absent.
+// argv stripped of "xql sp" — so args[0] is the first user-supplied token
+// (either a flag or the list URL).
 func runSPImpl(args []string) int {
 	fs := flag.NewFlagSet("xql sp", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagList           = fs.String("list", "", "SharePoint list URL (required)")
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
@@ -35,7 +30,7 @@ func runSPImpl(args []string) int {
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: xql sp --list <list-url> [--exec STATEMENT] [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: xql sp [flags] <list-url>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
 		fs.PrintDefaults()
@@ -48,13 +43,14 @@ func runSPImpl(args []string) int {
 		return 2
 	}
 
-	if *flagList == "" {
-		fmt.Fprintln(os.Stderr, "Error: --list is required")
+	listURL := fs.Arg(0)
+	if listURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: SharePoint list URL is required")
 		fs.Usage()
 		return 2
 	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "Error: unexpected positional arguments: %v\n", fs.Args())
+	if fs.NArg() > 1 {
+		fmt.Fprintf(os.Stderr, "Error: unexpected extra arguments after %q: %v\n", listURL, fs.Args()[1:])
 		return 2
 	}
 
@@ -75,7 +71,7 @@ func runSPImpl(args []string) int {
 
 	graph := sp.NewGraphClient(client, result.Account)
 
-	bound, err := sp.ResolveListBinding(ctx, graph, *flagList)
+	bound, err := sp.ResolveListBinding(ctx, graph, listURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to bind list: %v\n", err)
 		return 1
