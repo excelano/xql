@@ -10,7 +10,7 @@ The SharePoint backend authenticates through a multi-tenant Microsoft Entra appl
 
 | Property | Value |
 |---|---|
-| Display name | Excelano SharePoint tools (xql, xftp) |
+| Display name | Excelano SharePoint tools |
 | Verified publisher | Excelano LLC (Microsoft-verified) |
 | Application (client) ID | `13be0775-ed76-4407-bb2c-b7a07a189bf6` |
 | Supported account types | Multi-tenant (accounts in any organization) |
