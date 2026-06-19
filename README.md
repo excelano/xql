@@ -91,6 +91,7 @@ The uninstaller removes the `xql` binary it finds on `PATH` and asks before remo
 |------|------------|--------|
 | `csv` | `.csv`, `.tsv` | available |
 | `sp`  | (never inferred — URL + auth required) | available |
+| `xinglet` | (never inferred — `xinglet://` URL + Bearer token required) | available (read-only) |
 
 `xql --help` lists registered backends. `xql <backend> --help` shows backend-specific flags.
 
@@ -168,13 +169,32 @@ The SharePoint backend binds to a single list and runs the same SQL grammar agai
 
 History persists at `~/.config/xql/history-sp`. The list URL can be the bare list root or an AllItems.aspx variant; URL-encoded list-name segments are decoded automatically. Pass `--all-fields` to include hidden and system columns in `SELECT *`; by default the REPL hides them, matching what the SharePoint UI shows.
 
+### Xinglet backend
+
+```
+xql xinglet xinglet://4babff02-909f-4dba-b3df-3edf14b778bf
+```
+
+The xinglet backend reads a remote [xinglist](https://xinglet.com) over HTTPS and pipes the CSV body through the same loader and executor as `xql csv`. Authentication is a single Bearer token; mint one at [xinglet.com/home/tokens.php](https://xinglet.com/home/tokens.php) and export it before running:
+
+```sh
+export XINGLET_TOKEN=xglt_...
+xql xinglet xinglet://<uuid>
+```
+
+`XINGLET_BASE_URL` overrides the server host if you self-host xinglet on a different domain (default `https://xinglet.com`). The token is sent only on the URL named on the command line — `xql` does not store, log, or persist it.
+
+The backend is **read-only**: only `SELECT` is supported. `INSERT`, `UPDATE`, and `DELETE` are rejected with a clear error, since the server exposes no write endpoint over Bearer auth. `refresh` re-fetches the list and rebuilds the table — useful for catching upstream edits without restarting the REPL. History persists at `~/.config/xql/history-xinglet`.
+
+The xinglist export carries inline column type annotations (`Count:number`, `Joined:date`, `Status:choice(active|inactive)`) which the backend translates to xql type hints automatically — queries reference the bare column name (`Count`, `Joined`, `Status`) and comparisons run against the correct type.
+
 ## SQL subset
 
 `xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `ORDER BY`, `LIMIT`. No JOINs, no subqueries. The grammar carries forward from `sqlcsv` v2.0 unchanged — code written against `sqlcsv` runs against `xql csv` as-is, and the same grammar applies to `xql sp`.
 
 ## Security
 
-`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
+`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). `xql xinglet` calls the xinglist export endpoint over HTTPS with `Authorization: Bearer $XINGLET_TOKEN`; the token is never persisted by `xql` (it lives only in your shell environment for the lifetime of the process). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
 
 ## License
 

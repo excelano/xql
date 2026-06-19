@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -61,16 +62,23 @@ func LoadCSV(path string, opts LoadOptions) (*cell.Table, error) {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
 	defer f.Close()
+	return LoadCSVReader(path, f, opts)
+}
 
+// LoadCSVReader is the io.Reader form of LoadCSV. The label is purely
+// cosmetic -- it populates Table.Path (used in REPL banners and Refresh
+// output) and appears in load-time error messages. Non-file backends pass
+// something user-recognizable like "xinglet://<uuid>".
+func LoadCSVReader(label string, src io.Reader, opts LoadOptions) (*cell.Table, error) {
 	delim := opts.Delim
 	if delim == 0 {
 		delim = ','
 	}
 
-	// Peek for a UTF-8 BOM before the csv.Reader sees the file. Excel's
+	// Peek for a UTF-8 BOM before the csv.Reader sees the stream. Excel's
 	// "Save as CSV UTF-8" prepends one, and encoding/csv would otherwise
 	// fold it into the first column header.
-	br := bufio.NewReader(f)
+	br := bufio.NewReader(src)
 	if peek, _ := br.Peek(len(utf8BOM)); len(peek) == len(utf8BOM) && string(peek) == string(utf8BOM) {
 		_, _ = br.Discard(len(utf8BOM))
 	}
@@ -82,10 +90,10 @@ func LoadCSV(path string, opts LoadOptions) (*cell.Table, error) {
 
 	records, err := r.ReadAll()
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading %s: %w", label, err)
 	}
 	if len(records) == 0 {
-		return nil, fmt.Errorf("%s is empty", path)
+		return nil, fmt.Errorf("%s is empty", label)
 	}
 
 	var columns []string
@@ -103,7 +111,7 @@ func LoadCSV(path string, opts LoadOptions) (*cell.Table, error) {
 			columns[i] = strings.TrimSpace(name)
 		}
 		if err := validateHeaders(columns); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, fmt.Errorf("%s: %w", label, err)
 		}
 		dataStart = 1
 	}
@@ -147,7 +155,7 @@ func LoadCSV(path string, opts LoadOptions) (*cell.Table, error) {
 	}
 
 	return &cell.Table{
-		Path:      path,
+		Path:      label,
 		Columns:   columns,
 		Schema:    schema,
 		Rows:      rows,

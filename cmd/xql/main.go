@@ -37,6 +37,12 @@ var backends = []Backend{
 		Summary:    "Run XQL against a SharePoint list (auth required).",
 		Run:        runSP,
 	},
+	{
+		Name:       "xinglet",
+		Extensions: nil, // xinglet:// is a URL form, not a file extension.
+		Summary:    "Run XQL against a remote xinglist (Bearer token required, read-only).",
+		Run:        runXinglet,
+	},
 }
 
 func main() {
@@ -98,16 +104,18 @@ func printUsage(w io.Writer, reg []Backend) {
 		if len(b.Extensions) > 0 {
 			exts = "inferred from " + strings.Join(b.Extensions, ", ")
 		}
-		fmt.Fprintf(w, "  %-4s  %s\n        %s\n", b.Name, b.Summary, exts)
+		fmt.Fprintf(w, "  %-8s  %s\n            %s\n", b.Name, b.Summary, exts)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Backend help:")
-	fmt.Fprintln(w, "  xql csv --help")
-	fmt.Fprintln(w, "  xql sp  --help")
+	fmt.Fprintln(w, "  xql csv     --help")
+	fmt.Fprintln(w, "  xql sp      --help")
+	fmt.Fprintln(w, "  xql xinglet --help")
 }
 
-// runCSV delegates to runCSVImpl in csv.go and runSP delegates to runSPImpl
-// in sp.go. Thin shims so the Backend table's function values stay stable
-// identifiers (the backend bodies live with the rest of their flag parsing).
-func runCSV(args []string) int { return runCSVImpl(args) }
-func runSP(args []string) int  { return runSPImpl(args) }
+// runCSV, runSP, and runXinglet are thin shims so the Backend table's
+// function values stay stable identifiers (the backend bodies live with
+// the rest of their flag parsing in csv.go / sp.go / xinglet.go).
+func runCSV(args []string) int     { return runCSVImpl(args) }
+func runSP(args []string) int      { return runSPImpl(args) }
+func runXinglet(args []string) int { return runXingletImpl(args) }
