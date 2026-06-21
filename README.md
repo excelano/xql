@@ -190,7 +190,7 @@ The xinglist export carries inline column type annotations (`Count:number`, `Joi
 
 ## SQL subset
 
-`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `ORDER BY`, `LIMIT`. No JOINs, no subqueries. The grammar carries forward from `sqlcsv` v2.0 unchanged — code written against `sqlcsv` runs against `xql csv` as-is, and the same grammar applies to `xql sp`.
+`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
 
 ## Security
 
