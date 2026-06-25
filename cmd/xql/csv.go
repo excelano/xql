@@ -7,11 +7,27 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/excelano/encsniff-go"
+
 	"github.com/excelano/xql/internal/cell"
 	csvbackend "github.com/excelano/xql/internal/csv"
 	"github.com/excelano/xql/internal/parse"
 	"github.com/excelano/xql/internal/repl"
 )
+
+// warnIfNonUTF8 sniffs path and prints a one-time warning on suspected non-
+// UTF-8 input. UTF-8 BOM is handled silently by the CSV loader downstream;
+// only the warn-worthy encodings surface here. Sniff failures are non-fatal
+// — they fall through to LoadCSV, which will produce a clearer error if the
+// file really is unreadable.
+func warnIfNonUTF8(path string) {
+	s, err := encsniff.SniffFile(path)
+	if err != nil || s.Action != encsniff.Warn {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "xql: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	fmt.Fprintf(os.Stderr, "hint: %s\n", s.Hint)
+}
 
 // runCSVImpl is the CSV-backend entry point. The dispatcher hands us argv
 // stripped of "xql csv" — so args[0] is the first user-supplied token (either
@@ -68,6 +84,8 @@ func runCSVImpl(args []string) int {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
+
+	warnIfNonUTF8(csvPath)
 
 	t, err := csvbackend.LoadCSV(csvPath, csvbackend.LoadOptions{
 		Delim:     delim,
