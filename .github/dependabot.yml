@@ -1,5 +1,7 @@
 # Dependabot keeps Go module and GitHub Actions dependencies current so
-# security fixes show up as PRs rather than slipping past.
+# security fixes show up as PRs rather than slipping past. Each ecosystem
+# is grouped into one weekly PR so bumps share a single lockfile change
+# instead of stacking conflicting updates.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -9,6 +11,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    groups:
+      go-modules:
+        patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -16,3 +22,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
