@@ -141,6 +141,8 @@ By default, the CSV backend expects a header row, comma delimiter, double-quote 
 
 A UTF-8 byte-order mark (BOM) at the start of the file — common in Excel's "Save as CSV UTF-8" output — is stripped automatically; the first column name is not prefixed with it. CRLF and LF line endings are both accepted. Fields containing the delimiter, embedded quotes, or embedded newlines work as long as they are properly double-quoted per RFC 4180.
 
+If the file looks like UTF-7 (the `+ACI-` escape that Scoutbook exports emit) or carries a UTF-16 BOM, `xql` prints a warning at startup with the `iconv` command needed to convert it to UTF-8, then proceeds. Detection is done from byte-perfect signatures only — no encoding-guessing heuristic — so a false positive on a real UTF-8 file is vanishingly unlikely.
+
 Parsing uses `LazyQuotes = true`, which is forgiving about bare quotes mid-field and unbalanced quotes — usually a good thing for messy real-world files, but it can mask data corruption in a CSV that was truncated mid-export. A row count that does not match what you expect is the symptom.
 
 Headers are trimmed of leading and trailing whitespace; the load fails clearly if a header is empty or duplicates another header, since both quietly corrupt schema lookups.
