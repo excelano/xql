@@ -82,6 +82,9 @@ func (e *Executor) rejectMutationOutput(verb string) error {
 // dry-run (commit=false: preview only) from a real write (commit=true: preview
 // + apply). It is ignored for SELECT.
 func (e *Executor) Execute(ctx context.Context, stmt parse.Stmt, commit bool) error {
+	if err := eval.CanonicalizeStmt(stmt, buildCellSchemaFromFieldInfo(e.Bound.Schema)); err != nil {
+		return err
+	}
 	switch s := stmt.(type) {
 	case *parse.SelectStmt:
 		return e.executeSelect(ctx, s)

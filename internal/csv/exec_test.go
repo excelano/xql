@@ -1655,6 +1655,43 @@ func TestExecDecideCommit(t *testing.T) {
 	}
 }
 
+// TestExecCaseInsensitiveColumnRef is the end-to-end repro of excelano/xql#1:
+// a WHERE clause that names a column in a different case than the header
+// should resolve and return the right row, with the header on output using
+// the canonical schema name.
+func TestExecCaseInsensitiveColumnRef(t *testing.T) {
+	e, out, _ := newExec(t)
+	stmt, err := parse.Parse("SELECT title, status WHERE title = 'Alpha'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2 (header + 1 row): %q", len(lines), out.String())
+	}
+	if lines[0] != "Title\tStatus" {
+		t.Errorf("header should preserve canonical case: got %q, want %q", lines[0], "Title\tStatus")
+	}
+	if lines[1] != "Alpha\tOpen" {
+		t.Errorf("row: %q", lines[1])
+	}
+}
+
+func TestExecCaseInsensitiveUnknownColumn(t *testing.T) {
+	e, _, _ := newExec(t)
+	stmt, err := parse.Parse("SELECT * WHERE notacolumn = 'x'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = e.Execute(stmt, false)
+	if err == nil || !strings.Contains(err.Error(), `unknown column "notacolumn"`) {
+		t.Errorf("want unknown-column error preserving user-typed name, got %v", err)
+	}
+}
+
 func TestRemoveIndices(t *testing.T) {
 	rows := []cell.Row{
 		{cell.Cell{Int: 1}}, {cell.Cell{Int: 2}}, {cell.Cell{Int: 3}}, {cell.Cell{Int: 4}}, {cell.Cell{Int: 5}},

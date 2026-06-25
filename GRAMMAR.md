@@ -118,7 +118,7 @@ Inside a quoted identifier, escape a double quote by doubling it (`""`). Inside 
 
 ## Semantics notes
 
-Keywords (`SELECT`, `UPDATE`, `WHERE`, `AND`, `GROUP`, `HAVING`, `AS`, etc.) are case-insensitive. Identifiers (column names) are case-sensitive. Column names containing spaces, punctuation, or non-ASCII characters must be quoted with double quotes.
+Keywords (`SELECT`, `UPDATE`, `WHERE`, `AND`, `GROUP`, `HAVING`, `AS`, etc.) are case-insensitive. Identifiers (column names) are case-insensitive on input and resolved against the bound schema by ASCII case-folding; the canonical schema name is preserved on output. When two schema columns differ only in case (`ID` and `id`), an unqualified reference returns an ambiguous-column error rather than picking one. Column names containing spaces, punctuation, or non-ASCII characters must be quoted with double quotes.
 
 `NULL` represents missing or empty data. Only `IS NULL` and `IS NOT NULL` test for it; `col = NULL` is a parse error, since `=` with `NULL` is always undefined in SQL. A NULL value on either side of a comparison or pattern test makes the result UNKNOWN, which excludes the row.
 

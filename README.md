@@ -194,6 +194,8 @@ The xinglist export carries inline column type annotations (`Count:number`, `Joi
 
 `xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
 
+Column names are case-insensitive on input — `select * where firstname = 'John'` resolves against a `Firstname` header. Output preserves the canonical header case. If a schema carries two columns that differ only in case (`ID` and `id`), referencing either form returns an ambiguous-column error rather than guessing.
+
 ## Security
 
 `xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). `xql xinglet` calls the xinglist export endpoint over HTTPS with `Authorization: Bearer $XINGLET_TOKEN`; the token is never persisted by `xql` (it lives only in your shell environment for the lifetime of the process). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
