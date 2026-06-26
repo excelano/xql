@@ -38,7 +38,7 @@ type Executor struct {
 // dry-run (commit=false: preview only) from a real write (commit=true: preview
 // + apply). It is ignored for SELECT.
 func (e *Executor) Execute(stmt parse.Stmt, commit bool) error {
-	if err := eval.CanonicalizeStmt(stmt, e.Table.Schema); err != nil {
+	if err := eval.CanonicalizeStmt(stmt, e.Table.Schema, nil); err != nil {
 		return err
 	}
 	switch s := stmt.(type) {

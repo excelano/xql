@@ -122,7 +122,7 @@ xql <path>           # equivalent when the extension is .csv or .tsv
 
 Opens a prompt bound to the file. Arrow keys recall history, Ctrl-R searches it, Ctrl-D exits. History persists at `~/.config/xql/history-csv` across sessions (one history file per backend).
 
-The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types, `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL. Output controls follow sqlite shapes (without the leading dot): `mode <table|tsv|csv|json>` sets how results render to stdout, `headers on|off` toggles the column-name row, `output 'PATH'` redirects subsequent SELECT results to PATH as CSV (sticky — type `output` with no argument to clear), and `once 'PATH'` redirects only the next statement.
+The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types (`describe all` on `xql sp` includes the SharePoint system columns hidden by default), `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL. Output controls follow sqlite shapes (without the leading dot): `mode <table|tsv|csv|json>` sets how results render to stdout, `headers on|off` toggles the column-name row, `output 'PATH'` redirects subsequent SELECT results to PATH as CSV (sticky — type `output` with no argument to clear), and `once 'PATH'` redirects only the next statement. Runtime toggles use `set <name> on|off`; today `set all-fields on` includes hidden SharePoint columns in `SELECT *`, and bare `set` lists the current state.
 
 Writes (INSERT, UPDATE, DELETE) preview by default. `xql` prints the affected count, a sample of the rows that match, and then prompts `Apply? [y/N]:`. Anything but `y` cancels. Append `!` to skip the prompt and commit immediately:
 
@@ -203,6 +203,8 @@ The xinglist export carries inline column type annotations (`Count:number`, `Joi
 `xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
 
 Column names are case-insensitive on input — `select * where firstname = 'John'` resolves against a `Firstname` header. Output preserves the canonical header case. If a schema carries two columns that differ only in case (`ID` and `id`), referencing either form returns an ambiguous-column error rather than guessing.
+
+On the SharePoint backend, columns can be referenced by either their internal name (what Graph uses for `$filter` and PATCH) or their display name (what the SharePoint UI shows). `describe` lists both side by side when they differ. CSV imports leave you with internal names like `field_5` and display names taken from the CSV header — `select vendor` and `select field_5` resolve to the same column. Use `describe all` to include SharePoint's system/hidden columns, and `set all-fields on` to include them in `SELECT *` at runtime (the launch flag `--all-fields` does the same).
 
 ## Security
 

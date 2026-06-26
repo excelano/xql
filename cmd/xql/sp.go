@@ -133,6 +133,8 @@ func runSPImpl(args []string) int {
 		SetMode:       func(m string) { exec.Mode = m },
 		SetHeaders:    func(on bool) { exec.Headers = on },
 		SetOutputPath: func(p string) { exec.OutputPath = p },
+		SetAllFields:  func(on bool) { exec.AllFields = on },
+		GetAllFields:  func() bool { return exec.AllFields },
 	}
 	if err := repl.Run(session); err != nil {
 		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)

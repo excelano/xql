@@ -82,7 +82,7 @@ func (e *Executor) rejectMutationOutput(verb string) error {
 // dry-run (commit=false: preview only) from a real write (commit=true: preview
 // + apply). It is ignored for SELECT.
 func (e *Executor) Execute(ctx context.Context, stmt parse.Stmt, commit bool) error {
-	if err := eval.CanonicalizeStmt(stmt, buildCellSchemaFromFieldInfo(e.Bound.Schema)); err != nil {
+	if err := eval.CanonicalizeStmt(stmt, buildCellSchemaFromFieldInfo(e.Bound.Schema), buildAliasMap(e.Bound.Schema)); err != nil {
 		return err
 	}
 	switch s := stmt.(type) {
@@ -1374,6 +1374,22 @@ func buildCellSchemaFromFieldInfo(schema map[string]FieldInfo) map[string]cell.C
 	out := make(map[string]cell.ColumnInfo, len(schema))
 	for name, fi := range schema {
 		out[name] = cell.ColumnInfo{Name: name, Type: FieldTypeToCellType(fi.Type)}
+	}
+	return out
+}
+
+// buildAliasMap returns a display-name → internal-name map (with duplicate
+// internal names preserved so the canonicalizer can surface display-name
+// ambiguity). Columns whose display name matches the internal name produce
+// no entry — they need no aliasing. Used by the canonicalizer to let users
+// reference columns by either the UI label or the Graph internal name.
+func buildAliasMap(schema map[string]FieldInfo) map[string][]string {
+	out := make(map[string][]string, len(schema))
+	for _, fi := range schema {
+		if fi.DisplayName == "" || fi.DisplayName == fi.Name {
+			continue
+		}
+		out[fi.DisplayName] = append(out[fi.DisplayName], fi.Name)
 	}
 	return out
 }

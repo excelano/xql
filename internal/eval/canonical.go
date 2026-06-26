@@ -16,8 +16,15 @@ import (
 // indexing keeps working. Returns an unknown-column error on the first
 // reference that does not resolve, and an ambiguous-column error when two
 // schema columns differ only in case.
-func CanonicalizeStmt(stmt parse.Stmt, schema map[string]cell.ColumnInfo) error {
-	r, err := newResolver(schema)
+//
+// aliases is an optional name-to-canonical map (typically SharePoint display
+// name → internal name) so users can reference columns by either name. Pass
+// nil when the backend has no aliases (CSV). Schema names take precedence:
+// a user-typed name that matches a schema key resolves there even when the
+// same string is also someone's display name. Aliases that collide with each
+// other (case-insensitively) surface as ambiguous-column errors at query time.
+func CanonicalizeStmt(stmt parse.Stmt, schema map[string]cell.ColumnInfo, aliases map[string][]string) error {
+	r, err := newResolver(schema, aliases)
 	if err != nil {
 		return err
 	}
@@ -37,12 +44,17 @@ func CanonicalizeStmt(stmt parse.Stmt, schema map[string]cell.ColumnInfo) error 
 // resolver maps lowercased column names to the canonical schema name. The
 // ambiguous set tracks lowercased names whose schema has more than one
 // canonical form so the caller's error message can list both real names.
+// aliasLower / aliasAmbiguous handle the same case-folding for the alias
+// dimension (display names); schema lookups are tried first.
 type resolver struct {
 	byLower   map[string]string
 	ambiguous map[string][]string
+
+	aliasLower     map[string]string
+	aliasAmbiguous map[string][]string
 }
 
-func newResolver(schema map[string]cell.ColumnInfo) (*resolver, error) {
+func newResolver(schema map[string]cell.ColumnInfo, aliases map[string][]string) (*resolver, error) {
 	r := &resolver{byLower: make(map[string]string, len(schema))}
 	for name := range schema {
 		k := strings.ToLower(name)
@@ -55,24 +67,66 @@ func newResolver(schema map[string]cell.ColumnInfo) (*resolver, error) {
 		}
 		r.byLower[k] = name
 	}
+
+	for alias, targets := range aliases {
+		ak := strings.ToLower(alias)
+		// Schema match always wins; aliases that collide with a schema key
+		// are silently shadowed. A display name that lowercase-equals an
+		// internal name resolves to the internal name, which is what Graph
+		// needs anyway.
+		if _, inSchema := r.byLower[ak]; inSchema {
+			continue
+		}
+		if len(targets) > 1 {
+			// Two columns share this display name; surface that as
+			// ambiguity at query time, listing the internal targets so
+			// the user can disambiguate.
+			if r.aliasAmbiguous == nil {
+				r.aliasAmbiguous = make(map[string][]string)
+			}
+			r.aliasAmbiguous[ak] = append(r.aliasAmbiguous[ak], targets...)
+			continue
+		}
+		if existing, ok := r.aliasLower[ak]; ok {
+			// Two distinct aliases lowercase to the same key (e.g.
+			// "Vendor" and "vendor" as display names of two different
+			// columns).
+			if r.aliasAmbiguous == nil {
+				r.aliasAmbiguous = make(map[string][]string)
+			}
+			r.aliasAmbiguous[ak] = append(r.aliasAmbiguous[ak], existing, targets[0])
+			continue
+		}
+		if r.aliasLower == nil {
+			r.aliasLower = make(map[string]string)
+		}
+		r.aliasLower[ak] = targets[0]
+	}
+
 	return r, nil
 }
 
-// resolve returns the canonical schema name for user. It always reports
-// ambiguity when both forms exist in the schema, even if user matches one
-// exactly — silently picking the exact match would surprise the next user
-// who happens to type the other case.
+// resolve returns the canonical schema name for user. Schema names take
+// precedence over aliases. Reports ambiguity when both forms exist in the
+// schema, even if user matches one exactly — silently picking the exact
+// match would surprise the next user who happens to type the other case.
 func (r *resolver) resolve(user string) (string, error) {
 	k := strings.ToLower(user)
 	if names, bad := r.ambiguous[k]; bad {
 		sort.Strings(names)
 		return "", fmt.Errorf("ambiguous column %q: matches %s", user, strings.Join(quote(dedupSorted(names)), " and "))
 	}
-	canon, ok := r.byLower[k]
-	if !ok {
-		return "", fmt.Errorf("unknown column %q", user)
+	if canon, ok := r.byLower[k]; ok {
+		return canon, nil
 	}
-	return canon, nil
+	if names, bad := r.aliasAmbiguous[k]; bad {
+		sort.Strings(names)
+		return "", fmt.Errorf("ambiguous column %q: display name matches %s", user, strings.Join(quote(dedupSorted(names)), " and "))
+	}
+	if target, ok := r.aliasLower[k]; ok {
+		return target, nil
+	}
+	return "", fmt.Errorf("unknown column %q", user)
 }
 
 func dedupSorted(xs []string) []string {

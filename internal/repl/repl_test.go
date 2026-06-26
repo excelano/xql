@@ -27,6 +27,12 @@ func TestParseMeta_Recognized(t *testing.T) {
 		{"output /tmp/bare-path.csv", "output", "/tmp/bare-path.csv"},
 		{"output", "output", ""},
 		{"once '/tmp/once.csv'", "once", "/tmp/once.csv"},
+		{"describe all", "describe", "all"},
+		{"DESCRIBE  ALL ;", "describe", "ALL"},
+		{"set", "set", ""},
+		{"set all-fields", "set", "all-fields"},
+		{"set all-fields on", "set", "all-fields on"},
+		{"set all-fields OFF;", "set", "all-fields OFF"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -196,6 +202,67 @@ func TestDispatchMeta_ModeRejectedIfNoSetter(t *testing.T) {
 	}
 }
 
+func TestDispatchMeta_SetAllFieldsOnOff(t *testing.T) {
+	f := newFake()
+	if _, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: "all-fields on"}, new(bool)); err != nil {
+		t.Fatalf("set all-fields on: %v", err)
+	}
+	if !f.allFields {
+		t.Error("set all-fields on did not flip state")
+	}
+	if _, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: "all-fields off"}, new(bool)); err != nil {
+		t.Fatalf("set all-fields off: %v", err)
+	}
+	if f.allFields {
+		t.Error("set all-fields off did not flip state back")
+	}
+}
+
+func TestDispatchMeta_SetAllFieldsBareReportsState(t *testing.T) {
+	f := newFake()
+	f.allFields = true
+	if _, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: "all-fields"}, new(bool)); err != nil {
+		t.Fatalf("set all-fields (bare): %v", err)
+	}
+	if !strings.Contains(f.out.String(), "all-fields: on") {
+		t.Errorf("bare set should report 'all-fields: on', got %q", f.out.String())
+	}
+}
+
+func TestDispatchMeta_SetBareListsToggles(t *testing.T) {
+	f := newFake()
+	if _, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: ""}, new(bool)); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if !strings.Contains(f.out.String(), "all-fields:") {
+		t.Errorf("bare set should list known toggles, got %q", f.out.String())
+	}
+}
+
+func TestDispatchMeta_SetAllFieldsBadValue(t *testing.T) {
+	f := newFake()
+	_, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: "all-fields maybe"}, new(bool))
+	if err == nil || !strings.Contains(err.Error(), "on or off") {
+		t.Fatalf("expected on-or-off error, got %v", err)
+	}
+}
+
+func TestDispatchMeta_SetUnknownToggle(t *testing.T) {
+	f := newFake()
+	_, err := dispatchMeta(f.s, &metaCmd{name: "set", arg: "verbose on"}, new(bool))
+	if err == nil || !strings.Contains(err.Error(), "unknown toggle") {
+		t.Fatalf("expected unknown-toggle error, got %v", err)
+	}
+}
+
+func TestDispatchMeta_SetUnsupportedWhenNoSetter(t *testing.T) {
+	s := &Session{Out: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	_, err := dispatchMeta(s, &metaCmd{name: "set", arg: ""}, new(bool))
+	if err == nil || !strings.Contains(err.Error(), "no runtime toggles") {
+		t.Fatalf("expected no-toggles error, got %v", err)
+	}
+}
+
 // fakeState wraps a Session whose Set* callbacks record into the embedded
 // fields, so a test can observe the meta-command's effect.
 type fakeState struct {
@@ -203,6 +270,7 @@ type fakeState struct {
 	mode        string
 	headers     bool
 	output      string
+	allFields   bool
 
 	s *Session
 }
@@ -215,6 +283,8 @@ func newFake() *fakeState {
 		SetMode:       func(m string) { f.mode = m },
 		SetHeaders:    func(on bool) { f.headers = on },
 		SetOutputPath: func(p string) { f.output = p },
+		SetAllFields:  func(on bool) { f.allFields = on },
+		GetAllFields:  func() bool { return f.allFields },
 	}
 	return f
 }

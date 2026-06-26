@@ -10,7 +10,13 @@ import (
 
 // Describe renders the bound table's columns and inferred types to w using
 // the executor's current format. Wired into the REPL's "describe" meta-cmd.
-func (e *Executor) Describe(w io.Writer) error {
+// The arg is accepted for signature parity with the SP backend's hidden-
+// column toggle; CSV columns have no hidden flag, so any non-empty arg is
+// rejected.
+func (e *Executor) Describe(w io.Writer, arg string) error {
+	if arg != "" {
+		return fmt.Errorf("describe: csv backend takes no arguments")
+	}
 	rows := make([]map[string]any, 0, len(e.Table.Columns))
 	for _, name := range e.Table.Columns {
 		info := e.Table.Schema[name]

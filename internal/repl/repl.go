@@ -30,7 +30,7 @@ type Session struct {
 	Banner      string // shown once after history loads, before the first prompt
 
 	Execute    func(stmt parse.Stmt, commit bool) error
-	Describe   func(w io.Writer) error
+	Describe   func(w io.Writer, arg string) error
 	Refresh    func() error
 	SetConfirm func(fn func() bool)
 
@@ -40,6 +40,13 @@ type Session struct {
 	SetMode       func(mode string)
 	SetHeaders    func(on bool)
 	SetOutputPath func(path string)
+
+	// SetAllFields / GetAllFields back the REPL's `set all-fields on|off`
+	// meta-command (and its bare-form state report). Backends that have
+	// no hidden-field concept (CSV) leave both nil; the REPL then rejects
+	// the meta-command with a "backend does not support" error.
+	SetAllFields func(on bool)
+	GetAllFields func() bool
 }
 
 // Run drives the prompt loop until ^D, "quit", or an unrecoverable read
@@ -172,7 +179,7 @@ func parseMeta(line string) *metaCmd {
 	name := strings.ToLower(head)
 	switch name {
 	case "quit", "exit", "help", "?", "describe", "refresh",
-		"mode", "headers", "once", "output":
+		"mode", "headers", "once", "output", "set":
 		return &metaCmd{name: name, arg: unquote(rest)}
 	}
 	return nil
@@ -210,7 +217,7 @@ func dispatchMeta(s *Session, m *metaCmd, onceArmed *bool) (quit bool, err error
 		printHelp(s.Out)
 		return false, nil
 	case "describe":
-		return false, s.Describe(s.Out)
+		return false, s.Describe(s.Out, m.arg)
 	case "refresh":
 		return false, s.Refresh()
 	case "mode":
@@ -221,6 +228,8 @@ func dispatchMeta(s *Session, m *metaCmd, onceArmed *bool) (quit bool, err error
 		return false, applyOutput(s, m.arg, onceArmed)
 	case "once":
 		return false, applyOnce(s, m.arg, onceArmed)
+	case "set":
+		return false, applySet(s, m.arg)
 	}
 	return false, fmt.Errorf("internal: unhandled meta command %q", m.name)
 }
@@ -276,6 +285,62 @@ func applyOutput(s *Session, arg string, onceArmed *bool) error {
 	return nil
 }
 
+// applySet implements the `set` meta-command. Bare `set` lists every
+// known toggle with its current state. `set <name>` reports just that
+// toggle. `set <name> <value>` flips it. Bare-form reads-state, no-args-no-
+// state-change matches the convention the other meta-commands use.
+func applySet(s *Session, arg string) error {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return reportAllToggles(s)
+	}
+	head, rest := splitFirstWord(arg)
+	name := strings.ToLower(head)
+	switch name {
+	case "all-fields":
+		return applySetAllFields(s, strings.TrimSpace(rest))
+	}
+	return fmt.Errorf("set: unknown toggle %q (try bare `set` to list)", head)
+}
+
+func reportAllToggles(s *Session) error {
+	any := false
+	if s.GetAllFields != nil {
+		fmt.Fprintf(s.Out, "all-fields: %s\n", onOff(s.GetAllFields()))
+		any = true
+	}
+	if !any {
+		return fmt.Errorf("set: backend has no runtime toggles")
+	}
+	return nil
+}
+
+func applySetAllFields(s *Session, value string) error {
+	if s.SetAllFields == nil || s.GetAllFields == nil {
+		return fmt.Errorf("set: backend does not support all-fields")
+	}
+	if value == "" {
+		fmt.Fprintf(s.Out, "all-fields: %s\n", onOff(s.GetAllFields()))
+		return nil
+	}
+	switch strings.ToLower(value) {
+	case "on", "true", "1", "yes":
+		s.SetAllFields(true)
+	case "off", "false", "0", "no":
+		s.SetAllFields(false)
+	default:
+		return fmt.Errorf("set all-fields: expected on or off, got %q", value)
+	}
+	return nil
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
 func applyOnce(s *Session, arg string, onceArmed *bool) error {
 	if s.SetOutputPath == nil {
 		return fmt.Errorf("backend does not support --output")
@@ -318,12 +383,16 @@ Meta-commands (case-insensitive):
   quit, exit         Exit the REPL.
   help, ?            This help.
   describe           Print the bound source's columns and inferred types.
+  describe all       Include SharePoint system/hidden columns.
   refresh            Re-read the bound source.
   mode <name>        Set stdout render mode: table, tsv, csv, json.
   headers on|off     Show or hide column headers in row-shaped output.
   output 'PATH'      Redirect statement results to PATH as CSV (sticky).
   output             Clear redirect; results return to stdout.
-  once 'PATH'        Redirect the NEXT statement only, then revert.`)
+  once 'PATH'        Redirect the NEXT statement only, then revert.
+  set                Show current state of every runtime toggle.
+  set <name>         Show current state of one toggle (e.g. set all-fields).
+  set <name> on|off  Flip a toggle (currently: all-fields on the sp backend).`)
 }
 
 func printParseError(out io.Writer, input string, err error) {

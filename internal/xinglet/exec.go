@@ -31,8 +31,8 @@ func (e *Executor) Execute(stmt parse.Stmt, commit bool) error {
 }
 
 // Describe delegates verbatim -- column listing has no read/write angle.
-func (e *Executor) Describe(w io.Writer) error {
-	return e.Inner.Describe(w)
+func (e *Executor) Describe(w io.Writer, arg string) error {
+	return e.Inner.Describe(w, arg)
 }
 
 // Refresh re-fetches the xinglist from the remote and swaps the inner

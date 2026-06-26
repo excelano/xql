@@ -27,7 +27,7 @@ func mustParse(t *testing.T, src string) parse.Stmt {
 
 func TestCanonicalizeWhereColumn(t *testing.T) {
 	stmt := mustParse(t, "SELECT * WHERE firstname = 'John'")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -40,7 +40,7 @@ func TestCanonicalizeWhereColumn(t *testing.T) {
 
 func TestCanonicalizeProjection(t *testing.T) {
 	stmt := mustParse(t, "SELECT firstname, LASTNAME, salary")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -55,7 +55,7 @@ func TestCanonicalizeProjection(t *testing.T) {
 
 func TestCanonicalizeOrderBy(t *testing.T) {
 	stmt := mustParse(t, "SELECT * ORDER BY salary DESC")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -66,7 +66,7 @@ func TestCanonicalizeOrderBy(t *testing.T) {
 
 func TestCanonicalizeGroupBy(t *testing.T) {
 	stmt := mustParse(t, "SELECT lastname, COUNT(*) GROUP BY lastname")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -77,7 +77,7 @@ func TestCanonicalizeGroupBy(t *testing.T) {
 
 func TestCanonicalizeUpdateAssignment(t *testing.T) {
 	stmt := mustParse(t, "UPDATE SET salary = 90000 WHERE firstname = 'John'")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	upd := stmt.(*parse.UpdateStmt)
@@ -88,7 +88,7 @@ func TestCanonicalizeUpdateAssignment(t *testing.T) {
 
 func TestCanonicalizeInsertColumns(t *testing.T) {
 	stmt := mustParse(t, "INSERT (firstname, LASTNAME) VALUES ('Jane', 'Doe')")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	ins := stmt.(*parse.InsertStmt)
@@ -99,7 +99,7 @@ func TestCanonicalizeInsertColumns(t *testing.T) {
 
 func TestCanonicalizeLikeAndBetweenAndNullTest(t *testing.T) {
 	stmt := mustParse(t, "SELECT * WHERE firstname LIKE 'J%' AND salary BETWEEN 1 AND 9 AND lastname IS NOT NULL")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -120,7 +120,7 @@ func TestCanonicalizeLikeAndBetweenAndNullTest(t *testing.T) {
 
 func TestCanonicalizeUnknownColumnError(t *testing.T) {
 	stmt := mustParse(t, "SELECT * WHERE nope = 'x'")
-	err := CanonicalizeStmt(stmt, sampleSchema())
+	err := CanonicalizeStmt(stmt, sampleSchema(), nil)
 	if err == nil {
 		t.Fatal("expected unknown-column error")
 	}
@@ -135,7 +135,7 @@ func TestCanonicalizeAmbiguousColumnError(t *testing.T) {
 		"id": {Name: "id", Type: cell.TypeString},
 	}
 	stmt := mustParse(t, "SELECT * WHERE id = 1")
-	err := CanonicalizeStmt(stmt, schema)
+	err := CanonicalizeStmt(stmt, schema, nil)
 	if err == nil {
 		t.Fatal("expected ambiguous-column error")
 	}
@@ -150,7 +150,7 @@ func TestCanonicalizeAmbiguousColumnError(t *testing.T) {
 func TestCanonicalizeExactMatchUnaffected(t *testing.T) {
 	// Already-canonical references should pass through unchanged.
 	stmt := mustParse(t, "SELECT Firstname WHERE Salary > 0")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
@@ -159,12 +159,104 @@ func TestCanonicalizeExactMatchUnaffected(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeDisplayNameAlias(t *testing.T) {
+	// SP backend pattern: internal name is field_1 / field_2; user types the
+	// display name (vendor, salary) and resolves to the internal name.
+	schema := map[string]cell.ColumnInfo{
+		"field_1": {Name: "field_1", Type: cell.TypeString},
+		"field_2": {Name: "field_2", Type: cell.TypeInt},
+	}
+	aliases := map[string][]string{
+		"vendor": {"field_1"},
+		"salary": {"field_2"},
+	}
+	stmt := mustParse(t, "SELECT vendor WHERE Salary > 90000")
+	if err := CanonicalizeStmt(stmt, schema, aliases); err != nil {
+		t.Fatalf("CanonicalizeStmt: %v", err)
+	}
+	sel := stmt.(*parse.SelectStmt)
+	if got := sel.Columns[0].Expr.(*parse.ColumnExpr).Name; got != "field_1" {
+		t.Errorf("vendor → %q, want field_1", got)
+	}
+	cmp := sel.Where.(*parse.Comparison)
+	if got := cmp.LExpr.(*parse.ColumnExpr).Name; got != "field_2" {
+		t.Errorf("Salary → %q, want field_2", got)
+	}
+}
+
+func TestCanonicalizeInternalNameStillWorks(t *testing.T) {
+	// The internal name remains a valid handle even when aliases are present,
+	// so existing scripts / power users referencing field_N keep working.
+	schema := map[string]cell.ColumnInfo{
+		"field_5": {Name: "field_5", Type: cell.TypeString},
+	}
+	aliases := map[string][]string{"contract_administrator": {"field_5"}}
+	stmt := mustParse(t, "SELECT * WHERE field_5 = 'jane'")
+	if err := CanonicalizeStmt(stmt, schema, aliases); err != nil {
+		t.Fatalf("CanonicalizeStmt: %v", err)
+	}
+}
+
+func TestCanonicalizeSchemaShadowsAlias(t *testing.T) {
+	// Internal name "Vendor" and a different column's display also being
+	// "Vendor": schema match wins, alias is shadowed. Predictable for the
+	// user who typed the name that exists internally.
+	schema := map[string]cell.ColumnInfo{
+		"Vendor":  {Name: "Vendor", Type: cell.TypeString},
+		"field_9": {Name: "field_9", Type: cell.TypeString},
+	}
+	aliases := map[string][]string{"Vendor": {"field_9"}}
+	stmt := mustParse(t, "SELECT vendor")
+	if err := CanonicalizeStmt(stmt, schema, aliases); err != nil {
+		t.Fatalf("CanonicalizeStmt: %v", err)
+	}
+	sel := stmt.(*parse.SelectStmt)
+	if got := sel.Columns[0].Expr.(*parse.ColumnExpr).Name; got != "Vendor" {
+		t.Errorf("vendor → %q, want Vendor (internal wins)", got)
+	}
+}
+
+func TestCanonicalizeAmbiguousDisplayName(t *testing.T) {
+	// Two columns sharing a display name → ambiguous; the error lists the
+	// internal names so the user can pick.
+	schema := map[string]cell.ColumnInfo{
+		"field_3": {Name: "field_3", Type: cell.TypeString},
+		"field_4": {Name: "field_4", Type: cell.TypeString},
+	}
+	aliases := map[string][]string{"state": {"field_3", "field_4"}}
+	stmt := mustParse(t, "SELECT * WHERE state = 'TX'")
+	err := CanonicalizeStmt(stmt, schema, aliases)
+	if err == nil {
+		t.Fatal("expected ambiguous-column error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous column") {
+		t.Errorf("want ambiguous error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"field_3"`) || !strings.Contains(err.Error(), `"field_4"`) {
+		t.Errorf("error should list internal names: %v", err)
+	}
+}
+
+func TestCanonicalizeAliasCaseInsensitive(t *testing.T) {
+	// Display name lookup case-folds the same way schema lookup does.
+	schema := map[string]cell.ColumnInfo{"field_1": {Name: "field_1", Type: cell.TypeString}}
+	aliases := map[string][]string{"Vendor": {"field_1"}}
+	stmt := mustParse(t, "SELECT VENDOR")
+	if err := CanonicalizeStmt(stmt, schema, aliases); err != nil {
+		t.Fatalf("CanonicalizeStmt: %v", err)
+	}
+	sel := stmt.(*parse.SelectStmt)
+	if got := sel.Columns[0].Expr.(*parse.ColumnExpr).Name; got != "field_1" {
+		t.Errorf("VENDOR → %q, want field_1", got)
+	}
+}
+
 func TestCanonicalizeOrderByAliasPassesThrough(t *testing.T) {
 	// Aggregated ORDER BY may reference a projection alias, not a schema
 	// column. The canonicalizer should not reject an unknown ORDER BY name —
 	// downstream resolveOrderByOutput handles alias matching.
 	stmt := mustParse(t, "SELECT COUNT(*) AS n ORDER BY n DESC")
-	if err := CanonicalizeStmt(stmt, sampleSchema()); err != nil {
+	if err := CanonicalizeStmt(stmt, sampleSchema(), nil); err != nil {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)

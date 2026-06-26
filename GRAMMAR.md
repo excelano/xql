@@ -160,7 +160,7 @@ Empty CSV cells are treated as `NULL` for the purposes of `IS NULL` and `IS NOT 
 
 ### SharePoint backend (`xql sp`)
 
-Identifiers must match a column's **internal name** in the bound SharePoint list, which may differ from its display name. The internal name is what appears in the column's URL when you edit it in SharePoint, with spaces and punctuation encoded.
+Identifiers can reference a column by either its **display name** (what the SharePoint UI shows) or its **internal name** (what Graph `$filter` expressions and PATCH bodies actually use). Most user-added columns have an internal name like `field_5` and a display name set from the column header — so `select vendor` and `select field_5` resolve to the same column. Internal names take precedence: if a column's internal name matches what you typed, that one wins even if some other column shares the display name. Two columns sharing the same display name surface as an ambiguous-column error listing the internal names so you can pick.
 
 String literals are coerced to the destination field's SharePoint type at execution time. DateTime fields parse ISO 8601 strings. Lookup fields accept the lookup item ID as a number, not the display text. Choice fields accept the option string verbatim. Person, Hyperlink, and Calculated columns are rejected on write at validation time, before any Graph round-trip.
 
