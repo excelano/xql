@@ -60,6 +60,14 @@ Install elsewhere than `/usr/local/bin` (or `~/.local/bin` if not writable):
 XQL_INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
 ```
 
+With [Homebrew](https://brew.sh) on macOS or Linux, so `brew upgrade` keeps it current:
+
+```sh
+brew tap excelano/tap
+brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
+brew install xql
+```
+
 On Debian or Ubuntu, install from the [Excelano apt repository](https://excelano.com/apt/) instead, so `apt upgrade` keeps it current:
 
 ```sh
