@@ -36,7 +36,36 @@ v1.0 shipped the CSV backend (replacing standalone [sqlcsv](https://github.com/e
 
 ## Install
 
-Prebuilt binary (Linux and macOS, x86_64 and arm64):
+### Debian and Ubuntu
+
+Add the [Excelano apt repository](https://excelano.com/apt/) once (one-time setup):
+
+```sh
+curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
+```
+
+Then install it, so `apt upgrade` keeps it current:
+
+```sh
+sudo apt install xql
+```
+
+### Homebrew
+
+On macOS or Linux, tap and trust the repository once — Homebrew gates third-party taps behind explicit trust (one-time setup):
+
+```sh
+brew tap excelano/tap
+brew trust excelano/tap
+```
+
+Then install it, so `brew upgrade` keeps it current:
+
+```sh
+brew install xql
+```
+
+### Prebuilt binary (Linux and macOS, x86_64 and arm64)
 
 ```
 curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
@@ -60,20 +89,7 @@ Install elsewhere than `/usr/local/bin` (or `~/.local/bin` if not writable):
 XQL_INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
 ```
 
-With [Homebrew](https://brew.sh) on macOS or Linux, so `brew upgrade` keeps it current:
-
-```sh
-brew tap excelano/tap
-brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
-brew install xql
-```
-
-On Debian or Ubuntu, install from the [Excelano apt repository](https://excelano.com/apt/) instead, so `apt upgrade` keeps it current:
-
-```sh
-curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
-sudo apt install xql
-```
+### Go
 
 From source (Go 1.24 or later):
 
