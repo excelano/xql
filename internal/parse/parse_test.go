@@ -745,7 +745,7 @@ func TestParse(t *testing.T) {
 					proj(colE("Status")),
 					proj(aggStar()),
 				},
-				GroupBy: []string{"Status"},
+				GroupBy: []Expr{&ColumnExpr{Name: "Status"}},
 			},
 		},
 		{
@@ -757,7 +757,7 @@ func TestParse(t *testing.T) {
 					proj(colE("Priority")),
 					proj(aggStar()),
 				},
-				GroupBy: []string{"Status", "Priority"},
+				GroupBy: []Expr{&ColumnExpr{Name: "Status"}, &ColumnExpr{Name: "Priority"}},
 			},
 		},
 		{
@@ -775,7 +775,7 @@ func TestParse(t *testing.T) {
 					proj(colE("Status")),
 					projAs(aggStar(), "n"),
 				},
-				GroupBy: []string{"Status"},
+				GroupBy: []Expr{&ColumnExpr{Name: "Status"}},
 				Having:  cmpE(aggStar(), ">", vnum("5")),
 			},
 		},
@@ -784,7 +784,7 @@ func TestParse(t *testing.T) {
 			input: "SELECT Status GROUP BY Status HAVING SUM(price) > 100",
 			want: &SelectStmt{
 				Columns: []Projection{proj(colE("Status"))},
-				GroupBy: []string{"Status"},
+				GroupBy: []Expr{&ColumnExpr{Name: "Status"}},
 				Having:  cmpE(aggE("SUM", colE("price")), ">", vnum("100")),
 			},
 		},
@@ -820,7 +820,7 @@ func TestParse(t *testing.T) {
 					projAs(aggStar(), "n"),
 				},
 				Where:   cmp("Priority", ">", vnum("1")),
-				GroupBy: []string{"Status"},
+				GroupBy: []Expr{&ColumnExpr{Name: "Status"}},
 				Having:  cmpE(aggStar(), ">", vnum("2")),
 				OrderBy: []OrderKey{desc("n")},
 				Limit:   iptr(10),
@@ -835,6 +835,77 @@ func TestParse(t *testing.T) {
 				proj(colE("min")),
 				proj(colE("max")),
 			}},
+		},
+
+		// scalar functions: LOWER / UPPER / TRIM in projections
+		{
+			name:  "select lower of column",
+			input: "SELECT LOWER(name)",
+			want: &SelectStmt{Columns: []Projection{
+				proj(&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("name")}}),
+			}},
+		},
+		{
+			name:  "select upper of column",
+			input: "SELECT UPPER(name) AS shout",
+			want: &SelectStmt{Columns: []Projection{
+				projAs(&FuncCallExpr{Name: "UPPER", Args: []Expr{colE("name")}}, "shout"),
+			}},
+		},
+		{
+			name:  "select trim of column",
+			input: "SELECT TRIM(name)",
+			want: &SelectStmt{Columns: []Projection{
+				proj(&FuncCallExpr{Name: "TRIM", Args: []Expr{colE("name")}}),
+			}},
+		},
+		{
+			name:  "scalar function names are case insensitive",
+			input: "SELECT lower(x), Upper(y), tRiM(z)",
+			want: &SelectStmt{Columns: []Projection{
+				proj(&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("x")}}),
+				proj(&FuncCallExpr{Name: "UPPER", Args: []Expr{colE("y")}}),
+				proj(&FuncCallExpr{Name: "TRIM", Args: []Expr{colE("z")}}),
+			}},
+		},
+		{
+			name:  "unknown-named function still parses",
+			input: "SELECT foo(x)",
+			want: &SelectStmt{Columns: []Projection{
+				proj(&FuncCallExpr{Name: "FOO", Args: []Expr{colE("x")}}),
+			}},
+		},
+		{
+			name:    "unterminated function call",
+			input:   "SELECT LOWER(x",
+			wantErr: "')'",
+		},
+
+		// scalar functions in GROUP BY
+		{
+			name:  "group by lower(column)",
+			input: "SELECT LOWER(app_name) AS k, COUNT(*) AS n GROUP BY LOWER(app_name)",
+			want: &SelectStmt{
+				Columns: []Projection{
+					projAs(&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("app_name")}}, "k"),
+					projAs(aggStar(), "n"),
+				},
+				GroupBy: []Expr{&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("app_name")}}},
+			},
+		},
+		{
+			name:  "group by mixed column and expression",
+			input: "SELECT Status, LOWER(app_name) GROUP BY Status, LOWER(app_name)",
+			want: &SelectStmt{
+				Columns: []Projection{
+					proj(colE("Status")),
+					proj(&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("app_name")}}),
+				},
+				GroupBy: []Expr{
+					&ColumnExpr{Name: "Status"},
+					&FuncCallExpr{Name: "LOWER", Args: []Expr{colE("app_name")}},
+				},
+			},
 		},
 	}
 

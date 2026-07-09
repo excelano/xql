@@ -383,15 +383,9 @@ type projEntry struct {
 // Pass 3 slice lands.
 func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error) {
 	cellSchema := buildCellSchemaFromFieldInfo(e.Bound.Schema)
-	groupCols := make(map[string]bool, len(sel.GroupBy))
-	for _, c := range sel.GroupBy {
-		if _, ok := e.Bound.Schema[c]; !ok {
-			return nil, fmt.Errorf("unknown column %q in GROUP BY", c)
-		}
-		if groupCols[c] {
-			return nil, fmt.Errorf("duplicate column %q in GROUP BY", c)
-		}
-		groupCols[c] = true
+	groupCols, err := validateGroupBy(sel.GroupBy, cellSchema)
+	if err != nil {
+		return nil, err
 	}
 	grouped := len(sel.GroupBy) > 0
 	if sel.Star {
@@ -453,7 +447,7 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error)
 		// aggregate. Each aggregate node is validated up front so SUM(Title)
 		// and similar fail at plan time, before any Graph fetch.
 		if grouped {
-			if bare := eval.BareColumnNotIn(pr.Expr, groupCols); bare != "" {
+			if bare := eval.BareColumnNotIn(pr.Expr, groupCols, sel.GroupBy); bare != "" {
 				return nil, fmt.Errorf("column %q must appear in GROUP BY or be wrapped in an aggregate", bare)
 			}
 		} else if bare := eval.BareColumn(pr.Expr); bare != "" {
@@ -530,7 +524,7 @@ func (e *Executor) executeImplicitAggregation(ctx context.Context, sel *parse.Se
 // of a live Graph fetch.
 func aggregateOneRow(tbl *cell.Table, plan []projEntry, having parse.Predicate, offset, limit *int) ([]string, []map[string]any, error) {
 	if having != nil {
-		if err := validateAggregatedHaving(having, nil, tbl.Schema); err != nil {
+		if err := validateAggregatedHaving(having, nil, nil, tbl.Schema); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -627,23 +621,24 @@ func (e *Executor) executeGroupedAggregation(ctx context.Context, sel *parse.Sel
 // DISTINCT, OFFSET, and LIMIT apply to the projected output rows.
 func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) ([]string, []map[string]any, error) {
 	evalCtx := eval.NewEvalContext(tbl)
-	groupCols := make(map[string]bool, len(sel.GroupBy))
-	groupColIdx := make([]int, len(sel.GroupBy))
-	groupColTypes := make([]cell.ColumnType, len(sel.GroupBy))
-	for i, c := range sel.GroupBy {
-		groupCols[c] = true
-		groupColIdx[i] = evalCtx.ColIdx[c]
-		groupColTypes[i] = tbl.Schema[c].Type
+	groupCols := groupByColumnNames(sel.GroupBy)
+	groupTypes := make([]cell.ColumnType, len(sel.GroupBy))
+	for i, g := range sel.GroupBy {
+		t, err := eval.ExprType(g, tbl.Schema)
+		if err != nil {
+			return nil, nil, err
+		}
+		groupTypes[i] = t
 	}
 	if sel.Having != nil {
-		if err := validateAggregatedHaving(sel.Having, groupCols, tbl.Schema); err != nil {
+		if err := validateAggregatedHaving(sel.Having, groupCols, sel.GroupBy, tbl.Schema); err != nil {
 			return nil, nil, err
 		}
 	}
 	templateAggs := collectAllAggregates(plan, sel.Having)
 
 	type group struct {
-		keyCells   []cell.Cell
+		sourceRow  cell.Row
 		slots      []*eval.AggSlot
 		slotByExpr map[*parse.AggregateExpr]*eval.AggSlot
 	}
@@ -651,10 +646,13 @@ func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) 
 	byKey := make(map[string]*group)
 
 	for _, row := range tbl.Rows {
-		key, keyCells := groupKey(row, groupColIdx, groupColTypes)
+		key, err := groupKeyByExprs(sel.GroupBy, groupTypes, row, evalCtx)
+		if err != nil {
+			return nil, nil, err
+		}
 		g, ok := byKey[key]
 		if !ok {
-			g = &group{keyCells: keyCells, slotByExpr: make(map[*parse.AggregateExpr]*eval.AggSlot, len(templateAggs))}
+			g = &group{sourceRow: row, slotByExpr: make(map[*parse.AggregateExpr]*eval.AggSlot, len(templateAggs))}
 			for _, a := range templateAggs {
 				s, err := eval.NewAggSlot(a, tbl.Schema)
 				if err != nil {
@@ -679,21 +677,14 @@ func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) 
 	}
 
 	rowsOut := make([]map[string]any, 0, len(groupOrder))
-	syntheticRow := make(cell.Row, len(tbl.Columns))
 	for _, key := range groupOrder {
 		g := byKey[key]
-		for i := range syntheticRow {
-			syntheticRow[i] = cell.Cell{}
-		}
-		for i, col := range sel.GroupBy {
-			syntheticRow[evalCtx.ColIdx[col]] = g.keyCells[i]
-		}
 		evalCtx.AggResults = make(map[*parse.AggregateExpr]eval.EvalCell, len(g.slots))
 		for a, s := range g.slotByExpr {
 			evalCtx.AggResults[a] = s.Finalize()
 		}
 		if sel.Having != nil {
-			ok, err := eval.Matches(sel.Having, syntheticRow, evalCtx)
+			ok, err := eval.Matches(sel.Having, g.sourceRow, evalCtx)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -703,7 +694,7 @@ func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) 
 		}
 		m := make(map[string]any, len(plan))
 		for _, p := range plan {
-			res, err := eval.EvalExpr(p.Expr, syntheticRow, evalCtx)
+			res, err := eval.EvalExpr(p.Expr, g.sourceRow, evalCtx)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -749,21 +740,21 @@ func aggregateGrouped(tbl *cell.Table, plan []projEntry, sel *parse.SelectStmt) 
 // their column to live in the allowed set.
 //
 // Copied from internal/csv/exec.go per the copy-and-diff convention.
-func validateAggregatedHaving(p parse.Predicate, allowed map[string]bool, schema map[string]cell.ColumnInfo) error {
+func validateAggregatedHaving(p parse.Predicate, allowedCols map[string]bool, allowedExprs []parse.Expr, schema map[string]cell.ColumnInfo) error {
 	switch n := p.(type) {
 	case *parse.BinaryOp:
-		if err := validateAggregatedHaving(n.L, allowed, schema); err != nil {
+		if err := validateAggregatedHaving(n.L, allowedCols, allowedExprs, schema); err != nil {
 			return err
 		}
-		return validateAggregatedHaving(n.R, allowed, schema)
+		return validateAggregatedHaving(n.R, allowedCols, allowedExprs, schema)
 	case *parse.NotOp:
-		return validateAggregatedHaving(n.Inner, allowed, schema)
+		return validateAggregatedHaving(n.Inner, allowedCols, allowedExprs, schema)
 	case *parse.Comparison:
 		if err := eval.ValidateExpr(n.LExpr, schema); err != nil {
 			return err
 		}
-		if bare := eval.BareColumnNotIn(n.LExpr, allowed); bare != "" {
-			if len(allowed) == 0 {
+		if bare := eval.BareColumnNotIn(n.LExpr, allowedCols, allowedExprs); bare != "" {
+			if len(allowedExprs) == 0 {
 				return fmt.Errorf("HAVING: column %q must appear inside an aggregate (no GROUP BY)", bare)
 			}
 			return fmt.Errorf("HAVING: column %q must appear in GROUP BY or be wrapped in an aggregate", bare)
@@ -775,25 +766,93 @@ func validateAggregatedHaving(p parse.Predicate, allowed map[string]bool, schema
 		}
 		return nil
 	case *parse.NullTest:
-		return havingRequiresGroupCol(n.Column, allowed)
+		return havingRequiresGroupCol(n.Column, allowedCols, allowedExprs)
 	case *parse.LikeOp:
-		return havingRequiresGroupCol(n.Column, allowed)
+		return havingRequiresGroupCol(n.Column, allowedCols, allowedExprs)
 	case *parse.InOp:
-		return havingRequiresGroupCol(n.Column, allowed)
+		return havingRequiresGroupCol(n.Column, allowedCols, allowedExprs)
 	case *parse.BetweenOp:
-		return havingRequiresGroupCol(n.Column, allowed)
+		return havingRequiresGroupCol(n.Column, allowedCols, allowedExprs)
 	}
 	return fmt.Errorf("internal: unhandled HAVING predicate type %T", p)
 }
 
-func havingRequiresGroupCol(col string, allowed map[string]bool) error {
-	if !allowed[col] {
-		if len(allowed) == 0 {
+func havingRequiresGroupCol(col string, allowedCols map[string]bool, allowedExprs []parse.Expr) error {
+	if !allowedCols[col] {
+		if len(allowedExprs) == 0 {
 			return fmt.Errorf("HAVING: column %q can only appear under GROUP BY (no GROUP BY here)", col)
 		}
 		return fmt.Errorf("HAVING: column %q must appear in GROUP BY", col)
 	}
 	return nil
+}
+
+// validateGroupBy runs schema and shape checks on the GROUP BY expression
+// list and returns the set of bare-column entries. Copy-and-diff of the CSV
+// backend's helper; the two paths need matching behavior so mixed-backend
+// queries produce identical error messages for the same statement shape.
+func validateGroupBy(exprs []parse.Expr, schema map[string]cell.ColumnInfo) (map[string]bool, error) {
+	groupCols := make(map[string]bool, len(exprs))
+	seen := make(map[string]struct{}, len(exprs))
+	for _, e := range exprs {
+		if err := eval.ValidateExpr(e, schema); err != nil {
+			return nil, fmt.Errorf("GROUP BY: %w", err)
+		}
+		if eval.HasAggregate(e) {
+			return nil, fmt.Errorf("GROUP BY cannot contain aggregate functions")
+		}
+		key := renderExpr(e)
+		if _, dup := seen[key]; dup {
+			return nil, fmt.Errorf("duplicate expression %q in GROUP BY", key)
+		}
+		seen[key] = struct{}{}
+		if col, ok := e.(*parse.ColumnExpr); ok {
+			groupCols[col.Name] = true
+		}
+	}
+	return groupCols, nil
+}
+
+// groupByColumnNames returns the set of bare-column GROUP BY entries — see
+// the CSV backend's copy for rationale.
+func groupByColumnNames(exprs []parse.Expr) map[string]bool {
+	out := make(map[string]bool, len(exprs))
+	for _, e := range exprs {
+		if col, ok := e.(*parse.ColumnExpr); ok {
+			out[col.Name] = true
+		}
+	}
+	return out
+}
+
+// groupKeyByExprs evaluates every GROUP BY expression against the row and
+// serializes the tuple to a stable dedup key. Copy-and-diff of the CSV
+// backend's helper.
+func groupKeyByExprs(exprs []parse.Expr, types []cell.ColumnType, row cell.Row, ctx *eval.EvalContext) (string, error) {
+	var b strings.Builder
+	for i, e := range exprs {
+		v, err := eval.EvalExpr(e, row, ctx)
+		if err != nil {
+			return "", err
+		}
+		if v.Cell.Null {
+			b.WriteString("N|")
+			continue
+		}
+		switch types[i] {
+		case cell.TypeInt:
+			fmt.Fprintf(&b, "I:%d|", v.Cell.Int)
+		case cell.TypeFloat:
+			fmt.Fprintf(&b, "F:%g|", v.Cell.Float)
+		case cell.TypeBool:
+			fmt.Fprintf(&b, "B:%t|", v.Cell.Bool)
+		case cell.TypeDate:
+			fmt.Fprintf(&b, "D:%d|", v.Cell.Date.UnixNano())
+		default:
+			fmt.Fprintf(&b, "S:%d:%s|", len(v.Cell.Str), v.Cell.Str)
+		}
+	}
+	return b.String(), nil
 }
 
 // collectAllAggregates pulls aggregate nodes from every plan expression and

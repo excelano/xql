@@ -46,6 +46,8 @@ func EvalExpr(e parse.Expr, row cell.Row, ctx *EvalContext) (EvalCell, error) {
 			}
 		}
 		return EvalCell{}, fmt.Errorf("aggregate %s evaluated outside an aggregation context", n.Func)
+	case *parse.FuncCallExpr:
+		return evalFuncCall(n, row, ctx)
 	}
 	return EvalCell{}, fmt.Errorf("internal: unhandled expression type %T", e)
 }
@@ -256,6 +258,8 @@ func ExprType(e parse.Expr, schema map[string]cell.ColumnInfo) (cell.ColumnType,
 		return arithResultType(lt, rt, n.Op), nil
 	case *parse.AggregateExpr:
 		return aggregateOutputType(n, schema)
+	case *parse.FuncCallExpr:
+		return scalarFuncOutputType(n, schema)
 	}
 	return cell.TypeString, fmt.Errorf("internal: unhandled expression type %T", e)
 }
@@ -289,6 +293,13 @@ func HasAggregate(e parse.Expr) bool {
 		return true
 	case *parse.BinaryExpr:
 		return HasAggregate(n.L) || HasAggregate(n.R)
+	case *parse.FuncCallExpr:
+		for _, a := range n.Args {
+			if HasAggregate(a) {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -308,31 +319,106 @@ func BareColumn(e parse.Expr) string {
 		return BareColumn(n.R)
 	case *parse.AggregateExpr:
 		return ""
+	case *parse.FuncCallExpr:
+		for _, a := range n.Args {
+			if c := BareColumn(a); c != "" {
+				return c
+			}
+		}
+		return ""
 	}
 	return ""
 }
 
-// BareColumnNotIn returns the name of a column reference that appears
-// outside any parse.AggregateExpr and is not in the allowed set, or "" if every
-// such reference is permitted. Used by GROUP BY validation: bare columns
-// must be one of the GROUP BY columns; aggregate arguments may reference
-// any column.
-func BareColumnNotIn(e parse.Expr, allowed map[string]bool) string {
+// BareColumnNotIn returns the name of a column reference that appears outside
+// any parse.AggregateExpr and is not covered by GROUP BY, or "" if every such
+// reference is permitted. Two forms of coverage:
+//
+//   - allowedCols names bare-column GROUP BY entries.
+//   - allowedExprs is the full list of GROUP BY expressions. At every subtree
+//     we first check whether the WHOLE subtree structurally matches one of
+//     these expressions; if so it is allowed without descending further, so
+//     `SELECT LOWER(x), COUNT(*) GROUP BY LOWER(x)` accepts the projection.
+//
+// allowedExprs may be nil; then only the map-based check applies.
+func BareColumnNotIn(e parse.Expr, allowedCols map[string]bool, allowedExprs []parse.Expr) string {
+	if exprMatchesAny(e, allowedExprs) {
+		return ""
+	}
 	switch n := e.(type) {
 	case *parse.ColumnExpr:
-		if allowed[n.Name] {
+		if allowedCols[n.Name] {
 			return ""
 		}
 		return n.Name
+	case *parse.LiteralExpr:
+		return ""
 	case *parse.BinaryExpr:
-		if c := BareColumnNotIn(n.L, allowed); c != "" {
+		if c := BareColumnNotIn(n.L, allowedCols, allowedExprs); c != "" {
 			return c
 		}
-		return BareColumnNotIn(n.R, allowed)
+		return BareColumnNotIn(n.R, allowedCols, allowedExprs)
 	case *parse.AggregateExpr:
+		return ""
+	case *parse.FuncCallExpr:
+		for _, a := range n.Args {
+			if c := BareColumnNotIn(a, allowedCols, allowedExprs); c != "" {
+				return c
+			}
+		}
 		return ""
 	}
 	return ""
+}
+
+// ExprEqual is a structural equality check across the Expr AST — same node
+// type, same operator/function name, same operand shape all the way down.
+// Used to recognize when a projection or HAVING subtree matches a GROUP BY
+// expression exactly (SQL's "functional dependency" rule collapsed to
+// syntactic equality; the canonicalizer has already normalized column names
+// so equal names compare identically).
+func ExprEqual(a, b parse.Expr) bool {
+	switch x := a.(type) {
+	case *parse.ColumnExpr:
+		y, ok := b.(*parse.ColumnExpr)
+		return ok && x.Name == y.Name
+	case *parse.LiteralExpr:
+		y, ok := b.(*parse.LiteralExpr)
+		return ok && x.Value == y.Value
+	case *parse.BinaryExpr:
+		y, ok := b.(*parse.BinaryExpr)
+		return ok && x.Op == y.Op && ExprEqual(x.L, y.L) && ExprEqual(x.R, y.R)
+	case *parse.AggregateExpr:
+		y, ok := b.(*parse.AggregateExpr)
+		if !ok || x.Func != y.Func || x.Star != y.Star {
+			return false
+		}
+		if x.Star {
+			return true
+		}
+		return ExprEqual(x.Arg, y.Arg)
+	case *parse.FuncCallExpr:
+		y, ok := b.(*parse.FuncCallExpr)
+		if !ok || x.Name != y.Name || len(x.Args) != len(y.Args) {
+			return false
+		}
+		for i := range x.Args {
+			if !ExprEqual(x.Args[i], y.Args[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func exprMatchesAny(e parse.Expr, allowed []parse.Expr) bool {
+	for _, a := range allowed {
+		if ExprEqual(e, a) {
+			return true
+		}
+	}
+	return false
 }
 
 // CollectAggregatesFromPredicate gathers aggregate nodes reachable from a
@@ -364,6 +450,11 @@ func CollectAggregates(e parse.Expr, out []*parse.AggregateExpr) []*parse.Aggreg
 	case *parse.BinaryExpr:
 		out = CollectAggregates(n.L, out)
 		return CollectAggregates(n.R, out)
+	case *parse.FuncCallExpr:
+		for _, a := range n.Args {
+			out = CollectAggregates(a, out)
+		}
+		return out
 	}
 	return out
 }
@@ -546,6 +637,8 @@ func ValidateExpr(e parse.Expr, schema map[string]cell.ColumnInfo) error {
 			return ValidateExpr(n.Arg, schema)
 		}
 		return nil
+	case *parse.FuncCallExpr:
+		return validateScalarFunc(n, schema)
 	}
 	return fmt.Errorf("internal: unhandled expression type %T", e)
 }

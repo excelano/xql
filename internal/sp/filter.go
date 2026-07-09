@@ -50,6 +50,9 @@ func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error
 	case *parse.Comparison:
 		col, ok := columnExprName(n.LExpr)
 		if !ok {
+			if fc, isFn := n.LExpr.(*parse.FuncCallExpr); isFn {
+				return "", fmt.Errorf("%s(...) in WHERE is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly (e.g. WHERE %s(app_name) = 'x' → WHERE app_name ILIKE 'x')", fc.Name, fc.Name)
+			}
 			return "", fmt.Errorf("arithmetic on a column reference in WHERE is not supported by SharePoint: OData $filter has no equivalent operator. Rewrite by computing the literal side yourself (e.g. WHERE Priority + 1 = 5 → WHERE Priority = 4)")
 		}
 		field, ok := schema[col]

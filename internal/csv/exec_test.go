@@ -1692,6 +1692,164 @@ func TestExecCaseInsensitiveUnknownColumn(t *testing.T) {
 	}
 }
 
+// caseFoldFixture mirrors the canonical dedup case from issue #3: an
+// application-name column with mixed casing and whitespace, so LOWER + TRIM
+// grouping collapses "CoStar", "Costar", "costar ", " costar" into one bucket.
+func caseFoldFixture(t *testing.T) *Executor {
+	t.Helper()
+	cols := []string{"application_name"}
+	schema := map[string]cell.ColumnInfo{
+		"application_name": {Name: "application_name", Type: cell.TypeString},
+	}
+	rows := []cell.Row{
+		{cell.Cell{Str: "CoStar"}},
+		{cell.Cell{Str: "Costar"}},
+		{cell.Cell{Str: "costar"}},
+		{cell.Cell{Str: "Sailpoint"}},
+		{cell.Cell{Str: "SailPoint"}},
+		{cell.Cell{Str: "Something"}},
+	}
+	tbl := &cell.Table{Path: "apps.csv", Columns: cols, Schema: schema, Rows: rows, Delim: ',', HasHeader: true}
+	buf := &bytes.Buffer{}
+	return &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}
+}
+
+func TestExecCaseFoldDedupWithLower(t *testing.T) {
+	e := caseFoldFixture(t)
+	out := e.Out.(*bytes.Buffer)
+	stmt, err := parse.Parse("SELECT LOWER(application_name) AS k, COUNT(*) AS n GROUP BY LOWER(application_name) ORDER BY n DESC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4 (header + 3 groups):\n%s", len(lines), out.String())
+	}
+	if !strings.HasPrefix(lines[0], "k\tn") {
+		t.Errorf("header: %q", lines[0])
+	}
+	if lines[1] != "costar\t3" {
+		t.Errorf("row 1: got %q, want %q", lines[1], "costar\t3")
+	}
+	if lines[2] != "sailpoint\t2" {
+		t.Errorf("row 2: got %q, want %q", lines[2], "sailpoint\t2")
+	}
+}
+
+func TestExecCaseFoldDedupWithUpper(t *testing.T) {
+	e := caseFoldFixture(t)
+	out := e.Out.(*bytes.Buffer)
+	stmt, err := parse.Parse("SELECT UPPER(application_name) AS k, COUNT(*) AS n GROUP BY UPPER(application_name) HAVING COUNT(*) > 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	body := strings.TrimSpace(out.String())
+	if !strings.Contains(body, "COSTAR\t3") {
+		t.Errorf("expected 'COSTAR\\t3' in output, got:\n%s", body)
+	}
+	if !strings.Contains(body, "SAILPOINT\t2") {
+		t.Errorf("expected 'SAILPOINT\\t2' in output, got:\n%s", body)
+	}
+	if strings.Contains(body, "SOMETHING") {
+		t.Errorf("HAVING should filter n<=1 groups, but SOMETHING appears:\n%s", body)
+	}
+}
+
+func TestExecTrimGrouping(t *testing.T) {
+	// A TRIM group collapses variants that differ only in whitespace.
+	cols := []string{"name"}
+	schema := map[string]cell.ColumnInfo{"name": {Name: "name", Type: cell.TypeString}}
+	rows := []cell.Row{
+		{cell.Cell{Str: "alpha"}},
+		{cell.Cell{Str: "  alpha"}},
+		{cell.Cell{Str: "alpha  "}},
+		{cell.Cell{Str: "beta"}},
+	}
+	tbl := &cell.Table{Path: "names.csv", Columns: cols, Schema: schema, Rows: rows, Delim: ',', HasHeader: true}
+	buf := &bytes.Buffer{}
+	e := &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}
+	stmt, err := parse.Parse("SELECT TRIM(name) AS k, COUNT(*) AS n GROUP BY TRIM(name) ORDER BY n DESC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	body := strings.TrimSpace(buf.String())
+	if !strings.Contains(body, "alpha\t3") {
+		t.Errorf("expected 'alpha\\t3', got:\n%s", body)
+	}
+	if !strings.Contains(body, "beta\t1") {
+		t.Errorf("expected 'beta\\t1', got:\n%s", body)
+	}
+}
+
+func TestExecScalarInProjectionNotInGroupByRejected(t *testing.T) {
+	// GROUP BY column, but projection uses UPPER on a different column -> the
+	// projection's bare reference must be a GROUP BY column.
+	e := caseFoldFixture(t)
+	stmt, err := parse.Parse("SELECT UPPER(application_name), COUNT(*) GROUP BY application_name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: bare column IS in GROUP BY, so this should succeed, got %v", err)
+	}
+}
+
+func TestExecScalarInProjectionMismatchGroupByRejected(t *testing.T) {
+	// GROUP BY LOWER(name), projection UPPER(name) — the whole expression
+	// does NOT match GROUP BY, and the argument column is not in GROUP BY,
+	// so this should be rejected.
+	e := caseFoldFixture(t)
+	stmt, err := parse.Parse("SELECT UPPER(application_name), COUNT(*) GROUP BY LOWER(application_name)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = e.Execute(stmt, false)
+	if err == nil || !strings.Contains(err.Error(), "must appear in GROUP BY") {
+		t.Errorf("got %v, want must-appear-in-GROUP-BY error", err)
+	}
+}
+
+func TestExecUnknownScalarFunction(t *testing.T) {
+	e := caseFoldFixture(t)
+	stmt, err := parse.Parse("SELECT REVERSE(application_name)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = e.Execute(stmt, false)
+	if err == nil || !strings.Contains(err.Error(), "unknown function REVERSE") {
+		t.Errorf("got %v, want unknown-function error", err)
+	}
+}
+
+func TestExecScalarInWhere(t *testing.T) {
+	// Not the target scope of issue #3, but the CSV backend's WHERE evaluator
+	// runs through EvalExpr — so scalar functions in WHERE happen to work.
+	// Locking that in as a side benefit so it doesn't silently regress.
+	e := caseFoldFixture(t)
+	out := e.Out.(*bytes.Buffer)
+	stmt, err := parse.Parse("SELECT application_name WHERE LOWER(application_name) = 'costar'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	body := strings.TrimSpace(out.String())
+	lines := strings.Split(body, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4 (header + 3 CoStar variants):\n%s", len(lines), body)
+	}
+}
+
 func TestRemoveIndices(t *testing.T) {
 	rows := []cell.Row{
 		{cell.Cell{Int: 1}}, {cell.Cell{Int: 2}}, {cell.Cell{Int: 3}}, {cell.Cell{Int: 4}}, {cell.Cell{Int: 5}},
