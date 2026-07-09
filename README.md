@@ -156,6 +156,8 @@ xql csv <path> --exec "<sql>"
 
 Runs one statement and exits. Writes need `--commit`; a bare DELETE (no WHERE clause) additionally needs `--confirm-destructive`. Output auto-detects to ASCII table on an interactive terminal and TSV when piped. Override with `--mode=csv` for RFC 4180 CSV, `--mode=json` for JSON, or pass `--no-output-header` to drop the header row in any row-shaped mode.
 
+`--describe` prints the bound resource's column schema and exits, without entering the REPL and without a SQL statement. On `xql sp`, combine with `--all-fields` to include hidden SharePoint columns.
+
 ### CSV dialect
 
 By default, the CSV backend expects a header row, comma delimiter, double-quote quoting, and UTF-8. Override with:

@@ -21,6 +21,7 @@ func runSPImpl(args []string) int {
 
 	var (
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagDescribe       = fs.Bool("describe", false, "Print the bound list's column schema and exit; skip the REPL. Combine with --all-fields to include hidden columns")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagAllFields      = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
@@ -33,7 +34,7 @@ func runSPImpl(args []string) int {
 		fmt.Fprintln(os.Stderr, "Usage: xql sp [flags] <list-url>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
-		fs.PrintDefaults()
+		printFlags(os.Stderr, fs)
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
 		fmt.Fprintln(os.Stderr, "~/.config/xql/sp-token.json.")
@@ -93,6 +94,18 @@ func runSPImpl(args []string) int {
 		ConfirmDestructive: *flagConfirm,
 		OutputPath:         *flagOutput,
 		Out:                os.Stdout,
+	}
+
+	if *flagDescribe {
+		arg := ""
+		if *flagAllFields {
+			arg = "all"
+		}
+		if err := exec.Describe(os.Stdout, arg); err != nil {
+			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	if *flagExec != "" {
