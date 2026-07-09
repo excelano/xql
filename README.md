@@ -225,7 +225,7 @@ Case-insensitive dedup profiling — the canonical use for the scalar functions 
 ```sql
 SELECT LOWER(application_name) AS k, COUNT(*) AS n
 GROUP BY LOWER(application_name)
-HAVING n > 1
+HAVING COUNT(*) > 1
 ORDER BY n DESC
 ```
 
@@ -234,6 +234,24 @@ ORDER BY n DESC
 Column names are case-insensitive on input — `select * where firstname = 'John'` resolves against a `Firstname` header. Output preserves the canonical header case. If a schema carries two columns that differ only in case (`ID` and `id`), referencing either form returns an ambiguous-column error rather than guessing.
 
 On the SharePoint backend, columns can be referenced by either their internal name (what Graph uses for `$filter` and PATCH) or their display name (what the SharePoint UI shows). `describe` lists both side by side when they differ. CSV imports leave you with internal names like `field_5` and display names taken from the CSV header — `select vendor` and `select field_5` resolve to the same column. Use `describe all` to include SharePoint's system/hidden columns, and `set all-fields on` to include them in `SELECT *` at runtime (the launch flag `--all-fields` does the same).
+
+## Claude Code skill
+
+An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in the [`skill/`](skill/) directory. Drop it into `~/.claude/skills/xql/` so Claude Code auto-loads it when you (or an agent) hit a task that fits xql:
+
+```sh
+git clone https://github.com/excelano/xql.git /tmp/xql-skill && \
+  cp -r /tmp/xql-skill/skill ~/.claude/skills/xql && \
+  rm -rf /tmp/xql-skill
+```
+
+Or, if `xql` is already checked out somewhere on your machine:
+
+```sh
+cp -r /path/to/xql/skill ~/.claude/skills/xql
+```
+
+The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, and steers agents toward DuckDB when the task actually needs JOINs.
 
 ## Security
 
