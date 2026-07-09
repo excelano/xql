@@ -199,7 +199,7 @@ SELECT Status, COUNT(*) AS n GROUP BY Status ORDER BY n DESC
 SELECT Status, AVG(price) GROUP BY Status HAVING AVG(price) > 50
 UPDATE SET counter = counter + 1 WHERE id = 7
 SELECT * WHERE price * qty > 100
-SELECT LOWER(app_name) AS k, COUNT(*) AS n GROUP BY LOWER(app_name) HAVING n > 1 ORDER BY n DESC
+SELECT LOWER(app_name) AS k, COUNT(*) AS n GROUP BY LOWER(app_name) HAVING COUNT(*) > 1 ORDER BY n DESC
 SELECT UPPER(TRIM(name)) AS canon, COUNT(*) GROUP BY UPPER(TRIM(name))
 ```
 
