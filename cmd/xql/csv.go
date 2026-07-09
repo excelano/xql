@@ -41,6 +41,7 @@ func runCSVImpl(args []string) int {
 
 	var (
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagDescribe       = fs.Bool("describe", false, "Print the bound table's column schema and exit; skip the REPL")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE in --exec mode")
@@ -55,7 +56,7 @@ func runCSVImpl(args []string) int {
 		fmt.Fprintln(os.Stderr, "Usage: xql csv [flags] <csv-file>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
-		fs.PrintDefaults()
+		printFlags(os.Stderr, fs)
 	}
 
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
@@ -111,6 +112,14 @@ func runCSVImpl(args []string) int {
 		ConfirmDestructive: *flagConfirm,
 		OutputPath:         *flagOutput,
 		Out:                os.Stdout,
+	}
+
+	if *flagDescribe {
+		if err := exec.Describe(os.Stdout, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 
 	if *flagExec != "" {

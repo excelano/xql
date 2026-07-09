@@ -24,6 +24,7 @@ func runXingletImpl(args []string) int {
 
 	var (
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagDescribe       = fs.Bool("describe", false, "Print the loaded xinglet's column schema and exit; skip the REPL")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagOutput         = fs.String("output", "", "Write SELECT results as CSV to this path")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
@@ -33,7 +34,7 @@ func runXingletImpl(args []string) int {
 		fmt.Fprintln(os.Stderr, "Usage: xql xinglet [flags] xinglet://<uuid>")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Flags:")
-		fs.PrintDefaults()
+		printFlags(os.Stderr, fs)
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Environment:")
 		fmt.Fprintln(os.Stderr, "  XINGLET_TOKEN     Bearer token (required). Mint at <base>/home/tokens.php.")
@@ -100,6 +101,14 @@ func runXingletImpl(args []string) int {
 		Out:        os.Stdout,
 	}
 	exec := &xinglet.Executor{Inner: inner, Cfg: cfg, UUID: uuid}
+
+	if *flagDescribe {
+		if err := exec.Describe(os.Stdout, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 
 	if *flagExec != "" {
 		cleaned, bangCommit := parse.PreProcess(*flagExec)
