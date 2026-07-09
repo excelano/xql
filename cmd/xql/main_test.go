@@ -114,6 +114,26 @@ func TestDispatch(t *testing.T) {
 			args: []string{"foo.json"},
 			want: want{code: 2, stderrSubstr: `".json"`},
 		},
+		{
+			name: "leading flag before file routes via extension inference",
+			args: []string{"--describe", "data.csv"},
+			want: want{code: 0, csvCalls: [][]string{{"--describe", "data.csv"}}},
+		},
+		{
+			name: "multiple leading flags before file",
+			args: []string{"--no-input-header", "--describe", "data.csv"},
+			want: want{code: 0, csvCalls: [][]string{{"--no-input-header", "--describe", "data.csv"}}},
+		},
+		{
+			name: "leading flag before subcommand strips subcommand only",
+			args: []string{"--describe", "csv", "data.csv"},
+			want: want{code: 0, csvCalls: [][]string{{"--describe", "data.csv"}}},
+		},
+		{
+			name: "only-flags input is an error",
+			args: []string{"--describe"},
+			want: want{code: 2, stderrSubstr: "no subcommand or file given"},
+		},
 	}
 
 	for _, tc := range cases {

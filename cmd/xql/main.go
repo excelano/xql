@@ -63,13 +63,34 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// Find the first non-flag token to route on, so `xql --describe data.csv`
+	// works the same as `xql data.csv --describe`. Leading `-flag` tokens
+	// (other than -h/--help/-V/--version, already handled above) get skipped
+	// here; each backend's flag parser handles the eventual reordering via
+	// reorderArgs, so the leading flag still binds correctly downstream.
+	routeIdx := 0
+	for routeIdx < len(args) && strings.HasPrefix(args[routeIdx], "-") {
+		routeIdx++
+	}
+	if routeIdx >= len(args) {
+		fmt.Fprintln(stderr, "xql: no subcommand or file given (only flags).")
+		printUsage(stderr, reg)
+		return 2
+	}
+	route := args[routeIdx]
+
 	for _, b := range reg {
-		if args[0] == b.Name {
-			return b.Run(args[1:])
+		if route == b.Name {
+			// Strip the subcommand name from wherever it appears; preserve
+			// leading flags so they still reach the backend's parser.
+			passthrough := make([]string, 0, len(args)-1)
+			passthrough = append(passthrough, args[:routeIdx]...)
+			passthrough = append(passthrough, args[routeIdx+1:]...)
+			return b.Run(passthrough)
 		}
 	}
 
-	ext := strings.ToLower(filepath.Ext(args[0]))
+	ext := strings.ToLower(filepath.Ext(route))
 	if ext != "" {
 		for _, b := range reg {
 			for _, candidate := range b.Extensions {
@@ -83,7 +104,7 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	fmt.Fprintf(stderr, "xql: unknown subcommand %q (and no recognized file extension).\n", args[0])
+	fmt.Fprintf(stderr, "xql: unknown subcommand %q (and no recognized file extension).\n", route)
 	printUsage(stderr, reg)
 	return 2
 }
