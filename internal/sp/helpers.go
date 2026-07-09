@@ -1,6 +1,8 @@
 package sp
 
 import (
+	"strings"
+
 	"github.com/excelano/xql/internal/cell"
 	"github.com/excelano/xql/internal/parse"
 )
@@ -54,6 +56,12 @@ func renderExprPrec(e parse.Expr, parentPrec int) string {
 			return n.Func + "(*)"
 		}
 		return n.Func + "(" + renderExpr(n.Arg) + ")"
+	case *parse.FuncCallExpr:
+		parts := make([]string, len(n.Args))
+		for i, a := range n.Args {
+			parts[i] = renderExpr(a)
+		}
+		return n.Name + "(" + strings.Join(parts, ", ") + ")"
 	}
 	return "?"
 }

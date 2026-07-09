@@ -17,14 +17,16 @@ func (*InsertStmt) stmt() {}
 
 // SelectStmt represents a SELECT. Star is true for `SELECT *`; in that case
 // Columns is nil. Distinct is true for `SELECT DISTINCT ...`. GroupBy is the
-// list of bare column names in user order; expressions in GROUP BY are a
-// future-version feature. Having is the post-aggregation predicate.
+// list of grouping expressions in user order — bare column names appear here
+// as ColumnExpr; a scalar-function call like `LOWER(app_name)` appears as
+// FuncCallExpr, wrapping the column reference. Having is the post-aggregation
+// predicate.
 type SelectStmt struct {
 	Distinct bool
 	Star     bool
 	Columns  []Projection
 	Where    Predicate
-	GroupBy  []string
+	GroupBy  []Expr
 	Having   Predicate
 	OrderBy  []OrderKey
 	Limit    *int
@@ -76,6 +78,7 @@ func (*ColumnExpr) expr()    {}
 func (*LiteralExpr) expr()   {}
 func (*BinaryExpr) expr()    {}
 func (*AggregateExpr) expr() {}
+func (*FuncCallExpr) expr()  {}
 
 type ColumnExpr struct {
 	Name string
@@ -99,6 +102,16 @@ type AggregateExpr struct {
 	Func string
 	Star bool
 	Arg  Expr
+}
+
+// FuncCallExpr is a scalar function call: NAME(arg1, arg2, ...). Name is the
+// upper-case canonical form (LOWER, UPPER, TRIM); the whitelist of supported
+// names and their arity is enforced by the evaluator, not the parser, so
+// unknown-function errors surface with the same "unknown function" phrasing
+// regardless of the call shape.
+type FuncCallExpr struct {
+	Name string
+	Args []Expr
 }
 
 // Predicate is the WHERE / HAVING tree.
@@ -712,26 +725,26 @@ func (p *parser) parseProjection() (Projection, error) {
 	return pr, nil
 }
 
-func (p *parser) parseGroupBy() ([]string, error) {
+func (p *parser) parseGroupBy() ([]Expr, error) {
 	if _, err := p.expect(TokBy, "BY after GROUP"); err != nil {
 		return nil, err
 	}
-	first, err := p.parseColumn()
+	first, err := p.parseExpr()
 	if err != nil {
 		return nil, err
 	}
-	cols := []string{first}
+	exprs := []Expr{first}
 	for {
 		if _, ok := p.accept(TokComma); !ok {
 			break
 		}
-		c, err := p.parseColumn()
+		e, err := p.parseExpr()
 		if err != nil {
 			return nil, err
 		}
-		cols = append(cols, c)
+		exprs = append(exprs, e)
 	}
-	return cols, nil
+	return exprs, nil
 }
 
 func (p *parser) parseOrderBy() ([]OrderKey, error) {
@@ -1052,15 +1065,23 @@ func (p *parser) parseFactor() (Expr, error) {
 		p.advance()
 		return &ColumnExpr{Name: t.Lit}, nil
 	case TokIdent:
-		// Aggregate call if followed by '(' and the name matches a known
-		// aggregate; otherwise a bare column reference. The lookahead keeps
-		// MIN / MAX / COUNT etc. usable as column names elsewhere.
+		// Any IDENT immediately followed by '(' is a function call. Aggregate
+		// names dispatch to parseAggregateBody; anything else becomes a
+		// FuncCallExpr, and the evaluator's whitelist decides whether the name
+		// is a supported scalar (LOWER, UPPER, TRIM). The lookahead keeps
+		// MIN / MAX / COUNT etc. usable as column names when NOT followed by
+		// '(' — a bare `count` in ORDER BY still means the column, not the
+		// aggregate.
 		if p.peekAt(1).Type == TokLParen {
 			if fn, ok := aggregateNames[strings.ToUpper(t.Lit)]; ok {
 				p.advance() // consume name
 				p.advance() // consume '('
 				return p.parseAggregateBody(fn)
 			}
+			name := t.Lit
+			p.advance() // consume name
+			p.advance() // consume '('
+			return p.parseFuncCallBody(name)
 		}
 		p.advance()
 		return &ColumnExpr{Name: t.Lit}, nil
@@ -1089,6 +1110,38 @@ func (p *parser) parseAggregateBody(fn string) (Expr, error) {
 		return nil, err
 	}
 	return &AggregateExpr{Func: fn, Arg: arg}, nil
+}
+
+// parseFuncCallBody is called after a non-aggregate function name and its
+// opening '(' have been consumed. Parses zero or more comma-separated argument
+// expressions and the closing ')'. The name is normalized to upper case so
+// downstream dispatch can compare against a canonical whitelist without
+// re-folding at every call site.
+func (p *parser) parseFuncCallBody(name string) (Expr, error) {
+	upper := strings.ToUpper(name)
+	if p.peek().Type == TokRParen {
+		p.advance()
+		return &FuncCallExpr{Name: upper}, nil
+	}
+	first, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	args := []Expr{first}
+	for {
+		if _, ok := p.accept(TokComma); !ok {
+			break
+		}
+		next, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, next)
+	}
+	if _, err := p.expect(TokRParen, "')'"); err != nil {
+		return nil, err
+	}
+	return &FuncCallExpr{Name: upper, Args: args}, nil
 }
 
 func (p *parser) parsePredicate() (Predicate, error) {

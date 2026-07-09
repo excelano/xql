@@ -1145,7 +1145,7 @@ func TestResolveProjectionGroupByBareColumn(t *testing.T) {
 			{Expr: &parse.ColumnExpr{Name: "Status"}},
 			{Expr: aggExpr("COUNT", "")},
 		},
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 	}
 	plan, err := e.resolveProjection(sel)
 	if err != nil {
@@ -1166,7 +1166,7 @@ func TestResolveProjectionGroupByRejectsBareNotInGroup(t *testing.T) {
 			{Expr: &parse.ColumnExpr{Name: "Title"}},
 			{Expr: aggExpr("COUNT", "")},
 		},
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 	}
 	_, err := e.resolveProjection(sel)
 	if err == nil {
@@ -1179,7 +1179,7 @@ func TestResolveProjectionGroupByRejectsBareNotInGroup(t *testing.T) {
 
 func TestResolveProjectionGroupByRejectsSelectStar(t *testing.T) {
 	e := groupProjTestExecutor()
-	sel := &parse.SelectStmt{Star: true, GroupBy: []string{"Status"}}
+	sel := &parse.SelectStmt{Star: true, GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}}
 	_, err := e.resolveProjection(sel)
 	if err == nil || !strings.Contains(err.Error(), "SELECT * with GROUP BY") {
 		t.Errorf("got %v, want SELECT * + GROUP BY rejection", err)
@@ -1190,10 +1190,10 @@ func TestResolveProjectionGroupByUnknownColumn(t *testing.T) {
 	e := groupProjTestExecutor()
 	sel := &parse.SelectStmt{
 		Columns: []parse.Projection{{Expr: aggExpr("COUNT", "")}},
-		GroupBy: []string{"Nope"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Nope"}},
 	}
 	_, err := e.resolveProjection(sel)
-	if err == nil || !strings.Contains(err.Error(), `unknown column "Nope" in GROUP BY`) {
+	if err == nil || !strings.Contains(err.Error(), `GROUP BY: unknown column "Nope"`) {
 		t.Errorf("got %v, want unknown-column error", err)
 	}
 }
@@ -1202,11 +1202,11 @@ func TestResolveProjectionGroupByDuplicateColumn(t *testing.T) {
 	e := groupProjTestExecutor()
 	sel := &parse.SelectStmt{
 		Columns: []parse.Projection{{Expr: aggExpr("COUNT", "")}},
-		GroupBy: []string{"Status", "Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}, &parse.ColumnExpr{Name: "Status"}},
 	}
 	_, err := e.resolveProjection(sel)
-	if err == nil || !strings.Contains(err.Error(), `duplicate column "Status" in GROUP BY`) {
-		t.Errorf("got %v, want duplicate-column error", err)
+	if err == nil || !strings.Contains(err.Error(), `duplicate expression "Status" in GROUP BY`) {
+		t.Errorf("got %v, want duplicate-expression error", err)
 	}
 }
 
@@ -1217,7 +1217,7 @@ func TestResolveProjectionGroupByAliasOnGroupColumn(t *testing.T) {
 			{Expr: &parse.ColumnExpr{Name: "Status"}, Alias: "s"},
 			{Expr: aggExpr("COUNT", ""), Alias: "n"},
 		},
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 	}
 	plan, err := e.resolveProjection(sel)
 	if err != nil {
@@ -1254,7 +1254,7 @@ func TestAggregateGroupedSingleColumn(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 		{Label: "s", Expr: aggExpr("SUM", "Count"), Type: cell.TypeFloat},
 	}
-	sel := &parse.SelectStmt{GroupBy: []string{"Status"}}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1291,7 +1291,7 @@ func TestAggregateGroupedTwoColumns(t *testing.T) {
 		{Label: "Priority", Expr: &parse.ColumnExpr{Name: "Priority"}, Type: cell.TypeFloat},
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
-	sel := &parse.SelectStmt{GroupBy: []string{"Status", "Priority"}}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}, &parse.ColumnExpr{Name: "Priority"}}}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1324,7 +1324,7 @@ func TestAggregateGroupedHavingFiltersOnAggregate(t *testing.T) {
 		{Label: "s", Expr: sumCount, Type: cell.TypeFloat},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Having:  cmpE(sumCount, ">", vnum("5")),
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1346,7 +1346,7 @@ func TestAggregateGroupedHavingOnGroupColumn(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Having:  cmp("Status", "=", vstr("Open")),
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1365,7 +1365,7 @@ func TestAggregateGroupedRejectsHavingBareColNotInGroup(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Having:  cmp("Count", ">", vnum("0")), // Count is not in GROUP BY
 	}
 	_, _, err := aggregateGrouped(tbl, plan, sel)
@@ -1381,7 +1381,7 @@ func TestAggregateGroupedHavingNullTestRequiresGroupCol(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Having:  isnull("Count", false), // bare Count IS NULL, not in GROUP BY
 	}
 	_, _, err := aggregateGrouped(tbl, plan, sel)
@@ -1403,7 +1403,7 @@ func TestAggregateGroupedEmptyInput(t *testing.T) {
 		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
-	sel := &parse.SelectStmt{GroupBy: []string{"Status"}}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1431,7 +1431,7 @@ func TestAggregateGroupedInsertionOrder(t *testing.T) {
 		{Label: "Status", Expr: &parse.ColumnExpr{Name: "Status"}, Type: cell.TypeString},
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
-	sel := &parse.SelectStmt{GroupBy: []string{"Status"}}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1454,7 +1454,7 @@ func TestAggregateGroupedDistinctDedupesAcrossGroups(t *testing.T) {
 	plan := []projEntry{
 		{Label: "one", Expr: litE(vnum("1")), Type: cell.TypeInt},
 	}
-	sel := &parse.SelectStmt{GroupBy: []string{"Status"}, Distinct: true}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}, Distinct: true}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1471,7 +1471,7 @@ func TestAggregateGroupedOffsetLimit(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	one := 1
-	sel := &parse.SelectStmt{GroupBy: []string{"Status"}, Limit: &one}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}, Limit: &one}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1479,7 +1479,7 @@ func TestAggregateGroupedOffsetLimit(t *testing.T) {
 	if len(rows) != 1 || rows[0]["Status"] != "Open" {
 		t.Errorf("LIMIT 1 should keep Open only, got %+v", rows)
 	}
-	sel = &parse.SelectStmt{GroupBy: []string{"Status"}, Offset: &one}
+	sel = &parse.SelectStmt{GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}}, Offset: &one}
 	_, rows, err = aggregateGrouped(tbl, plan, sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1499,7 +1499,7 @@ func TestAggregateGroupedSharedAggInProjectionAndHaving(t *testing.T) {
 		{Label: "s", Expr: shared, Type: cell.TypeFloat},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Having:  cmpE(shared, ">", vnum("5")),
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1553,7 +1553,7 @@ func TestValidateAggregatedHavingChecksAggregateArgType(t *testing.T) {
 	groupCols := map[string]bool{"Status": true}
 	// SUM on a string column (Status) should fail aggregate validation.
 	having := cmpE(aggExpr("SUM", "Status"), ">", vnum("0"))
-	err := validateAggregatedHaving(having, groupCols, tbl.Schema)
+	err := validateAggregatedHaving(having, groupCols, []parse.Expr{&parse.ColumnExpr{Name: "Status"}}, tbl.Schema)
 	if err == nil || !strings.Contains(err.Error(), "SUM") || !strings.Contains(err.Error(), "numeric") {
 		t.Errorf("got %v, want SUM numeric rejection", err)
 	}
@@ -1802,7 +1802,7 @@ func TestAggregateGroupedOrderByAggregateDesc(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		OrderBy: []parse.OrderKey{{Column: "n", Desc: true}},
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1825,7 +1825,7 @@ func TestAggregateGroupedOrderByGroupColumnAsc(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		OrderBy: []parse.OrderKey{{Column: "Status"}},
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1845,7 +1845,7 @@ func TestAggregateGroupedOrderByAlias(t *testing.T) {
 		{Label: "total", Expr: aggExpr("SUM", "Count"), Type: cell.TypeFloat},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		OrderBy: []parse.OrderKey{{Column: "total"}},
 	}
 	_, rows, err := aggregateGrouped(tbl, plan, sel)
@@ -1866,7 +1866,7 @@ func TestAggregateGroupedOrderByThenLimit(t *testing.T) {
 	}
 	one := 1
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		OrderBy: []parse.OrderKey{{Column: "n", Desc: true}},
 		Limit:   &one,
 	}
@@ -1887,7 +1887,7 @@ func TestAggregateGroupedOrderByUnknownLabel(t *testing.T) {
 		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy: []string{"Status"},
+		GroupBy: []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		OrderBy: []parse.OrderKey{{Column: "Nope"}},
 	}
 	_, _, err := aggregateGrouped(tbl, plan, sel)
@@ -1904,7 +1904,7 @@ func TestAggregateGroupedOrderByAfterDistinct(t *testing.T) {
 		{Label: "one", Expr: litE(vnum("1")), Type: cell.TypeInt},
 	}
 	sel := &parse.SelectStmt{
-		GroupBy:  []string{"Status"},
+		GroupBy:  []parse.Expr{&parse.ColumnExpr{Name: "Status"}},
 		Distinct: true,
 		OrderBy:  []parse.OrderKey{{Column: "one"}},
 	}
@@ -1964,5 +1964,119 @@ func TestRejectMutationOutput_UpdateDeleteInsert(t *testing.T) {
 				t.Errorf("error should name verb %q: %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// caseFoldTestTable builds a small in-memory list where display-name
+// grouping via LOWER collapses mixed-case values. Mirrors the CSV backend's
+// caseFoldFixture so the two backends see equivalent inputs.
+func caseFoldTestTable() *cell.Table {
+	schema := map[string]cell.ColumnInfo{
+		"application_name": {Name: "application_name", Type: cell.TypeString},
+	}
+	return &cell.Table{
+		Columns: []string{"application_name"},
+		Schema:  schema,
+		Rows: []cell.Row{
+			{cell.Cell{Str: "CoStar"}},
+			{cell.Cell{Str: "Costar"}},
+			{cell.Cell{Str: "costar"}},
+			{cell.Cell{Str: "Sailpoint"}},
+			{cell.Cell{Str: "SailPoint"}},
+			{cell.Cell{Str: "Something"}},
+		},
+	}
+}
+
+func TestAggregateGroupedWithLowerExpression(t *testing.T) {
+	tbl := caseFoldTestTable()
+	lower := &parse.FuncCallExpr{Name: "LOWER", Args: []parse.Expr{&parse.ColumnExpr{Name: "application_name"}}}
+	plan := []projEntry{
+		{Label: "k", Expr: lower, Type: cell.TypeString},
+		{Label: "n", Expr: aggExpr("COUNT", ""), Type: cell.TypeInt},
+	}
+	sel := &parse.SelectStmt{GroupBy: []parse.Expr{lower}}
+	_, rows, err := aggregateGrouped(tbl, plan, sel)
+	if err != nil {
+		t.Fatalf("aggregateGrouped: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d groups, want 3 (costar, sailpoint, something):\n%+v", len(rows), rows)
+	}
+	byKey := map[string]int64{}
+	for _, r := range rows {
+		byKey[r["k"].(string)] = r["n"].(int64)
+	}
+	if byKey["costar"] != 3 {
+		t.Errorf("costar count = %d, want 3", byKey["costar"])
+	}
+	if byKey["sailpoint"] != 2 {
+		t.Errorf("sailpoint count = %d, want 2", byKey["sailpoint"])
+	}
+	if byKey["something"] != 1 {
+		t.Errorf("something count = %d, want 1", byKey["something"])
+	}
+}
+
+func TestAggregateGroupedRejectsBareColumnUnderExprGroupBy(t *testing.T) {
+	// GROUP BY LOWER(name); projection references bare `application_name`.
+	// The bare column is not a group key (only its lowercased form is), so
+	// this must be rejected at plan time — the value varies within a group.
+	e := &Executor{
+		Bound: &BoundList{
+			Columns: []string{"application_name"},
+			Schema: map[string]FieldInfo{
+				"application_name": {Name: "application_name", DisplayName: "application_name", Type: FieldText},
+			},
+		},
+	}
+	lower := &parse.FuncCallExpr{Name: "LOWER", Args: []parse.Expr{&parse.ColumnExpr{Name: "application_name"}}}
+	sel := &parse.SelectStmt{
+		Columns: []parse.Projection{
+			{Expr: &parse.ColumnExpr{Name: "application_name"}},
+			{Expr: aggExpr("COUNT", "")},
+		},
+		GroupBy: []parse.Expr{lower},
+	}
+	_, err := e.resolveProjection(sel)
+	if err == nil || !strings.Contains(err.Error(), "must appear in GROUP BY") {
+		t.Fatalf("got %v, want must-appear-in-GROUP-BY error", err)
+	}
+}
+
+func TestValidateGroupByRejectsAggregate(t *testing.T) {
+	schema := map[string]cell.ColumnInfo{"x": {Name: "x", Type: cell.TypeInt}}
+	exprs := []parse.Expr{aggExpr("COUNT", "x")}
+	_, err := validateGroupBy(exprs, schema)
+	if err == nil || !strings.Contains(err.Error(), "aggregate") {
+		t.Fatalf("got %v, want aggregate-rejection error", err)
+	}
+}
+
+func TestValidateGroupByRejectsDuplicateExpression(t *testing.T) {
+	schema := map[string]cell.ColumnInfo{"x": {Name: "x", Type: cell.TypeString}}
+	lower := func() *parse.FuncCallExpr {
+		return &parse.FuncCallExpr{Name: "LOWER", Args: []parse.Expr{&parse.ColumnExpr{Name: "x"}}}
+	}
+	exprs := []parse.Expr{lower(), lower()}
+	_, err := validateGroupBy(exprs, schema)
+	if err == nil || !strings.Contains(err.Error(), "duplicate expression") {
+		t.Fatalf("got %v, want duplicate-expression error", err)
+	}
+}
+
+func TestODataFilterRejectsScalarFunctionInWhere(t *testing.T) {
+	// Scoped rejection: the SP OData translator can't emit LOWER(x) in
+	// $filter, so a WHERE-side scalar function should fail with an
+	// SP-permanent-rejection-style message rather than falling through.
+	pred := &parse.Comparison{
+		LExpr: &parse.FuncCallExpr{Name: "LOWER", Args: []parse.Expr{&parse.ColumnExpr{Name: "app_name"}}},
+		Op:    "=",
+		Value: parse.Value{Kind: parse.ValString, Str: "x"},
+	}
+	schema := map[string]FieldInfo{"app_name": {Name: "app_name", Type: FieldText}}
+	_, err := ToOData(pred, schema)
+	if err == nil || !strings.Contains(err.Error(), "not supported by SharePoint") || !strings.Contains(err.Error(), "LOWER") {
+		t.Fatalf("got %v, want SP-rejection error naming LOWER", err)
 	}
 }

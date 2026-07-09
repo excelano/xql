@@ -216,7 +216,18 @@ The xinglist export carries inline column type annotations (`Count:number`, `Joi
 
 ## SQL subset
 
-`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
+`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. `GROUP BY` accepts expressions, and the string-normalization scalars `LOWER`, `UPPER`, and `TRIM` are available in both projections and grouping. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
+
+Case-insensitive dedup profiling — the canonical use for the scalar functions — reads like this:
+
+```sql
+SELECT LOWER(application_name) AS k, COUNT(*) AS n
+GROUP BY LOWER(application_name)
+HAVING n > 1
+ORDER BY n DESC
+```
+
+`CoStar`, `Costar`, and `costar` collapse into one row.
 
 Column names are case-insensitive on input — `select * where firstname = 'John'` resolves against a `Firstname` header. Output preserves the canonical header case. If a schema carries two columns that differ only in case (`ID` and `id`), referencing either form returns an ambiguous-column error rather than guessing.
 

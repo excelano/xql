@@ -61,10 +61,12 @@ A bare column name (`SELECT Title`) projects that column unchanged. An arithmeti
 ```ebnf
 expr          := term ( ( "+" | "-" ) term )*
 term          := factor ( ( "*" | "/" ) factor )*
-factor        := column | literal | aggregate | "(" expr ")"
+factor        := column | literal | aggregate | scalar_func | "(" expr ")"
 
 aggregate     := "COUNT" "(" "*" ")"
                | ( "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" ) "(" expr ")"
+
+scalar_func   := identifier "(" ( expr ( "," expr )* )? ")"
 
 literal       := number | string | "TRUE" | "FALSE" | "NULL"
 ```
@@ -74,6 +76,8 @@ Multiplication and division bind tighter than addition and subtraction. Parenthe
 `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` are recognized as aggregates only when followed by `(`. Anywhere else they parse as bare identifiers, so a column literally named `min` or `count` can still be projected without quoting.
 
 Aggregates may not nest in standard SQL (`SUM(COUNT(*))` is undefined). The parser accepts the shape and the executor rejects it; this keeps the grammar straightforward.
+
+Scalar functions cover the string-normalization surface: `LOWER(s)`, `UPPER(s)`, and `TRIM(s)`. Each takes a single argument and produces a text result. Unknown names parse cleanly and produce an `unknown function` error at plan time, so mistyped `LOWERR(x)` fails with a clear message rather than a cryptic parse error. Non-string arguments are stringified before the function runs, so `LOWER(id)` on an integer column yields the digits as text.
 
 ## Predicates
 
@@ -195,12 +199,14 @@ SELECT Status, COUNT(*) AS n GROUP BY Status ORDER BY n DESC
 SELECT Status, AVG(price) GROUP BY Status HAVING AVG(price) > 50
 UPDATE SET counter = counter + 1 WHERE id = 7
 SELECT * WHERE price * qty > 100
+SELECT LOWER(app_name) AS k, COUNT(*) AS n GROUP BY LOWER(app_name) HAVING n > 1 ORDER BY n DESC
+SELECT UPPER(TRIM(name)) AS canon, COUNT(*) GROUP BY UPPER(TRIM(name))
 ```
 
 ## Out of scope
 
 Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join externally — for `xql csv` by loading the redirected files in a follow-up session, for `xql sp` by piping the CSVs through `sqlite3`, `xql csv`, or `jq`.
 
-Planned but not yet implemented: `ORDER BY` with expressions, `GROUP BY` with expressions, `COUNT(DISTINCT col)`, and scalar functions (`LOWER`, `UPPER`, `YEAR`, etc.).
+Planned but not yet implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and further scalar functions beyond the string-normalization set (`LENGTH`, `SUBSTRING`, `YEAR`, etc.). `GROUP BY` with expressions and the string-normalization functions `LOWER` / `UPPER` / `TRIM` shipped in 1.6.
 
 No current plan: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions. None are technically impossible, but each adds parser complexity for a use case that has not surfaced yet.

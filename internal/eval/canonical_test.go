@@ -70,8 +70,12 @@ func TestCanonicalizeGroupBy(t *testing.T) {
 		t.Fatalf("CanonicalizeStmt: %v", err)
 	}
 	sel := stmt.(*parse.SelectStmt)
-	if sel.GroupBy[0] != "Lastname" {
-		t.Errorf("GROUP BY: got %q, want %q", sel.GroupBy[0], "Lastname")
+	col, ok := sel.GroupBy[0].(*parse.ColumnExpr)
+	if !ok {
+		t.Fatalf("GROUP BY: got %T, want *parse.ColumnExpr", sel.GroupBy[0])
+	}
+	if col.Name != "Lastname" {
+		t.Errorf("GROUP BY: got %q, want %q", col.Name, "Lastname")
 	}
 }
 

@@ -158,12 +158,10 @@ func canonicalizeSelect(s *parse.SelectStmt, r *resolver) error {
 	if err := canonicalizePredicate(s.Where, r); err != nil {
 		return err
 	}
-	for i, col := range s.GroupBy {
-		canon, err := r.resolve(col)
-		if err != nil {
+	for _, e := range s.GroupBy {
+		if err := canonicalizeExpr(e, r); err != nil {
 			return err
 		}
-		s.GroupBy[i] = canon
 	}
 	if err := canonicalizePredicate(s.Having, r); err != nil {
 		return err
@@ -230,6 +228,13 @@ func canonicalizeExpr(e parse.Expr, r *resolver) error {
 			return nil
 		}
 		return canonicalizeExpr(n.Arg, r)
+	case *parse.FuncCallExpr:
+		for _, a := range n.Args {
+			if err := canonicalizeExpr(a, r); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return fmt.Errorf("internal: unhandled expression type %T", e)
 }
