@@ -237,18 +237,18 @@ On the SharePoint backend, columns can be referenced by either their internal na
 
 ## Claude Code skill
 
-An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in the [`skill/`](skill/) directory. Drop it into `~/.claude/skills/xql/` so Claude Code auto-loads it when you (or an agent) hit a task that fits xql:
+An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in [`skills/xql/`](skills/xql/). Drop it into `~/.claude/skills/` so Claude Code auto-loads it when you (or an agent) hit a task that fits xql:
 
 ```sh
 git clone https://github.com/excelano/xql.git /tmp/xql-skill && \
-  cp -r /tmp/xql-skill/skill ~/.claude/skills/xql && \
+  cp -r /tmp/xql-skill/skills/xql ~/.claude/skills/ && \
   rm -rf /tmp/xql-skill
 ```
 
 Or, if `xql` is already checked out somewhere on your machine:
 
 ```sh
-cp -r /path/to/xql/skill ~/.claude/skills/xql
+cp -r /path/to/xql/skills/xql ~/.claude/skills/
 ```
 
 The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, and steers agents toward DuckDB when the task actually needs JOINs.
