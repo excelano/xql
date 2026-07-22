@@ -65,6 +65,16 @@ Then install it, so `brew upgrade` keeps it current:
 brew install xql
 ```
 
+### Windows
+
+With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current:
+
+```powershell
+winget install Excelano.xql
+```
+
+Or download the `windows_amd64` zip from the [releases page](https://github.com/excelano/xql/releases) and unzip it.
+
 ### Prebuilt binary (Linux and macOS, x86_64 and arm64)
 
 ```
