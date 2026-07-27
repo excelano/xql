@@ -46,9 +46,14 @@ nfpms:
     maintainer: David M. Anderson <david.anderson@excelano.com>
     description: |
       XQL — Excelano Query Language CLI.
-      One binary, one SQL dialect, multiple backends. CSV backend wired
-      in v1.x (in-memory edits with type inference, dry-run writes);
-      SharePoint backend follows in a later release.
+      One binary, one SQL dialect, three backends: CSV files, SharePoint
+      Lists over Microsoft Graph, and xinglists (read-only). The same
+      SELECT runs against any of them; CSV and SharePoint also take
+      INSERT, UPDATE, and DELETE, which preview the affected rows and
+      commit only on confirmation.
+      Part of the Excelano tabular family — four small tools split by
+      what changes: xray observes and changes nothing, xled edits cell
+      values, xshape changes the grid's shape, xql queries the row set.
     homepage: https://github.com/excelano/xql
     license: MIT
     formats:
