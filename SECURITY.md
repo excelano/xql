@@ -12,11 +12,13 @@ The latest v1.x release receives security fixes. Older versions are not supporte
 
 ## What xql can access
 
-xql is a CLI that runs locally on your machine. It ships two backends as of v1.1.
+xql is a CLI that runs locally on your machine. Each backend is described below; run `xql --help` to see which ones your build offers.
 
 The CSV backend (`xql csv`) reads the file you point it at, holds it in memory for the duration of the session, and writes the modified file back when you commit a write statement. It makes no network calls, has no auth layer, and can only read and write files your operating-system user already has access to.
 
 The SharePoint backend (`xql sp`) calls Microsoft Graph over HTTPS to read and write items in a single bound SharePoint list. Authentication is delegated device-code OAuth against your Microsoft Entra ID account; the scope requested is `Sites.ReadWrite.All`. xql cannot access any data your account cannot already access in SharePoint Online. No other Graph endpoints are touched.
+
+The xinglet backend (`xql xinglet`) fetches a snapshot of one xinglist over HTTPS from the host named by `XINGLET_BASE_URL` (by default `https://xinglet.com`), authenticating with the `XINGLET_TOKEN` environment variable as an `Authorization: Bearer` header. The token is sent only to the URL named on the command line, and xql never stores, logs, or persists it — it lives in your shell environment for the lifetime of the process. The backend is read-only: `INSERT`, `UPDATE`, and `DELETE` are rejected before parsing, because the server exposes no write endpoint over Bearer auth.
 
 IT administrators evaluating the SharePoint backend for a Microsoft 365 tenant will find the application's registration details, the delegated-permission risk profile, and the consent and revocation steps in [ADMINS.md](ADMINS.md).
 

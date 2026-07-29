@@ -2,7 +2,7 @@
 
 The formal grammar for the SQL subset that `xql` accepts in its REPL. Anything outside this grammar produces a clear parse error pointing at the unsupported construct, rather than silently misinterpreting input.
 
-The same grammar applies across all three backends — `xql csv`, `xql sp`, and `xql xinglet` — which share one parser. The differences are in how identifiers resolve, how values coerce, which `LIKE` patterns are accepted (for `xql sp`), and which statement kinds run (`xql xinglet` is read-only). Those backend-specific notes are collected at the end of this document.
+The same grammar applies across every backend — `xql csv`, `xql sp`, and `xql xinglet` — which share one parser. The differences are in how identifiers resolve, how values coerce, which `LIKE` patterns are accepted (for `xql sp`), and which statement kinds run (`xql xinglet` is read-only). Those backend-specific notes are collected at the end of this document.
 
 ## Notation
 
@@ -52,7 +52,7 @@ A bare column name (`SELECT Title`) projects that column unchanged. An arithmeti
 
 `SELECT DISTINCT` collapses rows that have identical values across the projected columns. Deduplication runs after `WHERE` and `GROUP BY`, on the typed values. Two `NULL`s in the same projected column are considered equal for deduplication, matching standard SQL.
 
-`ORDER BY` sorts rows by one or more keys. Each key is a column name with an optional `ASC` (default) or `DESC` direction. In aggregated queries (`GROUP BY` or implicit aggregation), `ORDER BY` keys must name a column in the `SELECT` list — either an explicit `AS` alias or the rendered source text of an unaliased projection. Non-aggregated queries may sort by any source column, whether or not it appears in the projection. Expression keys (`ORDER BY price * qty`) are planned for a later release.
+`ORDER BY` sorts rows by one or more keys. Each key is a column name with an optional `ASC` (default) or `DESC` direction. In aggregated queries (`GROUP BY` or implicit aggregation), `ORDER BY` keys must name a column in the `SELECT` list — either an explicit `AS` alias or the rendered source text of an unaliased projection. Non-aggregated queries may sort by any source column, whether or not it appears in the projection. Expression keys (`ORDER BY price * qty`) are not accepted; alias the expression in the `SELECT` list and sort by the alias.
 
 `LIMIT n` takes at most the first n rows of the result, and `OFFSET m` skips the first m rows. Both require a non-negative integer literal; floats and negatives are parse errors.
 
@@ -207,6 +207,6 @@ SELECT UPPER(TRIM(name)) AS canon, COUNT(*) GROUP BY UPPER(TRIM(name))
 
 Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join externally — for `xql csv` by loading the redirected files in a follow-up session, for `xql sp` by piping the CSVs through `sqlite3`, `xql csv`, or `jq`.
 
-Planned but not yet implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and further scalar functions beyond the string-normalization set (`LENGTH`, `SUBSTRING`, `YEAR`, etc.). `GROUP BY` with expressions and the string-normalization functions `LOWER` / `UPPER` / `TRIM` shipped in 1.6.
+Not implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and scalar functions beyond the string-normalization set — `LENGTH`, `SUBSTRING`, and `YEAR` are not available. These are absences rather than refusals; `xql --help` and this document describe the build you have.
 
 No current plan: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions. None are technically impossible, but each adds parser complexity for a use case that has not surfaced yet.

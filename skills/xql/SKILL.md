@@ -27,7 +27,7 @@ The top-level dispatcher scans past any leading flags to find the first non-flag
 2. Otherwise, if the token has a recognized file extension (`.csv` or `.tsv`), the CSV backend runs with the full args.
 3. Otherwise, error.
 
-So all four of these are equivalent for a local CSV file:
+So these are all equivalent for a local CSV file:
 
 ```
 xql csv data.csv
@@ -45,7 +45,7 @@ xql xinglet xinglet://4babff02-909f-4dba-b3df-3edf14b778bf
 
 ## SQL subset — what's in and what's out
 
-Grammar shared across all three backends:
+Grammar shared across every backend:
 
 - `SELECT [DISTINCT] projection_list [WHERE ...] [GROUP BY expr, ...] [HAVING ...] [ORDER BY key, ...] [LIMIT n] [OFFSET m]`
 - `UPDATE SET col = expr, ... [WHERE ...]`
@@ -58,7 +58,7 @@ Projections may include arithmetic (`price * qty AS line_total`), aggregates (`C
 
 Predicates support `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] ILIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN a AND b`, and boolean composition with `AND`, `OR`, `NOT`. Left side is an expression (`WHERE price * qty > 100` is fine); right side is always a literal (`col1 = col2` is not supported).
 
-Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Not yet implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, further scalar functions (`LENGTH`, `SUBSTRING`, `YEAR`, etc.) — reserve those for a follow-up release.
+Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, `COUNT(DISTINCT col)`, scalar functions beyond `LOWER`/`UPPER`/`TRIM`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
 
 Case-insensitive on keywords AND column names on input; output preserves the canonical header case. Two columns that differ only in case (`ID` and `id`) surface as an ambiguous-column error rather than a guess.
 
