@@ -101,7 +101,7 @@ func Run(s *Session) error {
 		if m := parseMeta(trimmed); m != nil {
 			quit, mErr := dispatchMeta(s, m, &onceArmed)
 			if mErr != nil {
-				fmt.Fprintf(s.Stderr, "Error: %v\n", mErr)
+				fmt.Fprintf(s.Stderr, "error: %v\n", mErr)
 			}
 			if quit {
 				return nil
@@ -119,7 +119,7 @@ func Run(s *Session) error {
 			continue
 		}
 		if err := s.Execute(stmt, commit); err != nil {
-			fmt.Fprintf(s.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(s.Stderr, "error: %v\n", err)
 		}
 		// Disarm `once` after the SQL statement runs (success or fail) so
 		// subsequent statements return to the prior output target.
@@ -398,10 +398,10 @@ Meta-commands (case-insensitive):
 func printParseError(out io.Writer, input string, err error) {
 	pe, ok := err.(*parse.ParseError)
 	if !ok {
-		fmt.Fprintf(out, "Parse error: %v\n", err)
+		fmt.Fprintf(out, "parse error: %v\n", err)
 		return
 	}
-	fmt.Fprintf(out, "Parse error: %s\n", pe.Msg)
+	fmt.Fprintf(out, "parse error: %s\n", pe.Msg)
 	fmt.Fprintf(out, "  %s\n", input)
 	if pe.Pos >= 0 && pe.Pos <= len(input) {
 		fmt.Fprintf(out, "  %s^\n", strings.Repeat(" ", pe.Pos))
