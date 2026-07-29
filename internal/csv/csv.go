@@ -59,7 +59,9 @@ func validateHeaders(cols []string) error {
 func LoadCSV(path string, opts LoadOptions) (*cell.Table, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
+		// os.Open's *PathError already reads "open <path>: <reason>", so an
+		// "opening <path>:" wrap here only makes the caller print the name twice.
+		return nil, err
 	}
 	defer f.Close()
 	return LoadCSVReader(path, f, opts)

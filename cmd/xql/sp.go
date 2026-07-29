@@ -47,18 +47,18 @@ func runSPImpl(args []string) int {
 
 	mode, err := resolveMode(*flagMode, *flagJSON)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
 	listURL := fs.Arg(0)
 	if listURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: SharePoint list URL is required")
+		fmt.Fprintln(os.Stderr, "xql: a SharePoint list URL is required")
 		fs.Usage()
 		return 2
 	}
 	if fs.NArg() > 1 {
-		fmt.Fprintf(os.Stderr, "Error: unexpected extra arguments after %q: %v\n", listURL, fs.Args()[1:])
+		fmt.Fprintf(os.Stderr, "xql: unexpected extra arguments after %q: %v\n", listURL, fs.Args()[1:])
 		return 2
 	}
 
@@ -67,13 +67,13 @@ func runSPImpl(args []string) int {
 
 	client, err := sp.NewPublicClient(tokenCachePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Setup error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: setup: %v\n", err)
 		return 1
 	}
 
 	result, err := sp.Authenticate(ctx, client)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Authentication failed: %v%s\n", err, sp.HintForAuthError(err))
+		fmt.Fprintf(os.Stderr, "xql: authentication failed: %v%s\n", err, sp.HintForAuthError(err))
 		return 1
 	}
 
@@ -81,13 +81,13 @@ func runSPImpl(args []string) int {
 
 	bound, err := sp.ResolveListBinding(ctx, graph, listURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to bind list: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: could not bind list: %v\n", err)
 		return 1
 	}
 
 	if *flagOutput != "" {
 		if err := repl.TruncateOutputFile(*flagOutput); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 	}
@@ -109,7 +109,7 @@ func runSPImpl(args []string) int {
 			arg = "all"
 		}
 		if err := exec.Describe(os.Stdout, arg); err != nil {
-			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: describe: %v\n", err)
 			return 1
 		}
 		return 0
@@ -118,16 +118,16 @@ func runSPImpl(args []string) int {
 	if *flagExec != "" {
 		cleaned, bangCommit := parse.PreProcess(*flagExec)
 		if bangCommit {
-			fmt.Fprintln(os.Stderr, "Error: trailing '!' is not supported in --exec mode; use --commit")
+			fmt.Fprintln(os.Stderr, "xql: trailing '!' is not supported in --exec mode; use --commit")
 			return 2
 		}
 		stmt, err := parse.Parse(cleaned)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 		if err := exec.Execute(ctx, stmt, *flagCommit); err != nil {
-			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: execute: %v\n", err)
 			return 1
 		}
 		return 0
@@ -157,7 +157,7 @@ func runSPImpl(args []string) int {
 		GetAllFields:  func() bool { return exec.AllFields },
 	}
 	if err := repl.Run(session); err != nil {
-		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: repl: %v\n", err)
 		return 1
 	}
 	return 0

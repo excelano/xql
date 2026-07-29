@@ -82,30 +82,30 @@ func runCSVImpl(args []string) int {
 
 	csvPath := fs.Arg(0)
 	if csvPath == "" {
-		fmt.Fprintln(os.Stderr, "Error: CSV file path is required")
+		fmt.Fprintln(os.Stderr, "xql: a CSV file path is required")
 		fs.Usage()
 		return 2
 	}
 	if fs.NArg() > 1 {
-		fmt.Fprintf(os.Stderr, "Error: unexpected extra arguments after %q: %v\n", csvPath, fs.Args()[1:])
+		fmt.Fprintf(os.Stderr, "xql: unexpected extra arguments after %q: %v\n", csvPath, fs.Args()[1:])
 		return 2
 	}
 
 	delim, err := resolveDelim(flagDelim, csvPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
 	mode, err := resolveMode(*flagMode, *flagJSON)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
 	hints, err := parseTypeHints(*flagTypes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
@@ -117,13 +117,13 @@ func runCSVImpl(args []string) int {
 		TypeHints: hints,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load CSV: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: could not load CSV: %v\n", err)
 		return 1
 	}
 
 	if *flagOutput != "" {
 		if err := repl.TruncateOutputFile(*flagOutput); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 	}
@@ -139,7 +139,7 @@ func runCSVImpl(args []string) int {
 
 	if *flagDescribe {
 		if err := exec.Describe(os.Stdout, ""); err != nil {
-			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: describe: %v\n", err)
 			return 1
 		}
 		return 0
@@ -148,16 +148,16 @@ func runCSVImpl(args []string) int {
 	if *flagExec != "" {
 		cleaned, bangCommit := parse.PreProcess(*flagExec)
 		if bangCommit {
-			fmt.Fprintln(os.Stderr, "Error: trailing '!' is not supported in --exec mode; use --commit")
+			fmt.Fprintln(os.Stderr, "xql: trailing '!' is not supported in --exec mode; use --commit")
 			return 2
 		}
 		stmt, err := parse.Parse(cleaned)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 		if err := exec.Execute(stmt, *flagCommit); err != nil {
-			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: execute: %v\n", err)
 			return 1
 		}
 		return 0
@@ -181,7 +181,7 @@ func runCSVImpl(args []string) int {
 		SetOutputPath: func(p string) { exec.OutputPath = p },
 	}
 	if err := repl.Run(session); err != nil {
-		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: repl: %v\n", err)
 		return 1
 	}
 	return 0

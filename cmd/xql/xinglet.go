@@ -50,24 +50,24 @@ func runXingletImpl(args []string) int {
 
 	mode, err := resolveMode(*flagMode, *flagJSON)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
 	rawURL := fs.Arg(0)
 	if rawURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: xinglet:// URL is required")
+		fmt.Fprintln(os.Stderr, "xql: a xinglet:// URL is required")
 		fs.Usage()
 		return 2
 	}
 	if fs.NArg() > 1 {
-		fmt.Fprintf(os.Stderr, "Error: unexpected extra arguments after %q: %v\n", rawURL, fs.Args()[1:])
+		fmt.Fprintf(os.Stderr, "xql: unexpected extra arguments after %q: %v\n", rawURL, fs.Args()[1:])
 		return 2
 	}
 
 	uuid, err := xinglet.ParseURL(rawURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 		return 2
 	}
 
@@ -77,7 +77,7 @@ func runXingletImpl(args []string) int {
 		if base == "" {
 			base = xinglet.DefaultBaseURL
 		}
-		fmt.Fprintf(os.Stderr, "Error: XINGLET_TOKEN is not set (mint one at %s/home/tokens.php).\n", base)
+		fmt.Fprintf(os.Stderr, "xql: XINGLET_TOKEN is not set (mint one at %s/home/tokens.php).\n", base)
 		return 2
 	}
 
@@ -89,13 +89,13 @@ func runXingletImpl(args []string) int {
 
 	table, err := xinglet.LoadList(cfg, uuid)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load xinglet: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: could not load xinglet: %v\n", err)
 		return 1
 	}
 
 	if *flagOutput != "" {
 		if err := repl.TruncateOutputFile(*flagOutput); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 	}
@@ -111,7 +111,7 @@ func runXingletImpl(args []string) int {
 
 	if *flagDescribe {
 		if err := exec.Describe(os.Stdout, ""); err != nil {
-			fmt.Fprintf(os.Stderr, "describe error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: describe: %v\n", err)
 			return 1
 		}
 		return 0
@@ -120,16 +120,16 @@ func runXingletImpl(args []string) int {
 	if *flagExec != "" {
 		cleaned, bangCommit := parse.PreProcess(*flagExec)
 		if bangCommit {
-			fmt.Fprintln(os.Stderr, "Error: trailing '!' is not supported in --exec mode (and the xinglet backend is read-only anyway)")
+			fmt.Fprintln(os.Stderr, "xql: trailing '!' is not supported in --exec mode (and the xinglet backend is read-only anyway)")
 			return 2
 		}
 		stmt, err := parse.Parse(cleaned)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: %v\n", err)
 			return 1
 		}
 		if err := exec.Execute(stmt, false); err != nil {
-			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "xql: execute: %v\n", err)
 			return 1
 		}
 		return 0
@@ -153,7 +153,7 @@ func runXingletImpl(args []string) int {
 		SetOutputPath: func(p string) { inner.OutputPath = p },
 	}
 	if err := repl.Run(session); err != nil {
-		fmt.Fprintf(os.Stderr, "REPL error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "xql: repl: %v\n", err)
 		return 1
 	}
 	return 0
