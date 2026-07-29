@@ -60,6 +60,16 @@ func TestDispatch(t *testing.T) {
 			want: want{code: 0, stdoutSubstr: "Backends:"},
 		},
 		{
+			name: "-V prints the tool name alongside the version",
+			args: []string{"-V"},
+			want: want{code: 0, stdoutSubstr: "xql "},
+		},
+		{
+			name: "--version prints the tool name alongside the version",
+			args: []string{"--version"},
+			want: want{code: 0, stdoutSubstr: "xql "},
+		},
+		{
 			name: "subcommand name routes with empty args",
 			args: []string{"csv"},
 			want: want{code: 0, csvCalls: [][]string{{}}},

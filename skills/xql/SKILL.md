@@ -85,7 +85,7 @@ When a write commits, xql rewrites the bound file (CSV) or PATCHes each affected
 | `--mode table\|tsv\|csv\|json` | Output format. Defaults to table on TTY, TSV when piped. |
 | `--no-input-header` | Source has no header; columns become `col1`, `col2`, … |
 | `--no-output-header` | Suppress the header row in output. |
-| `--delim CHAR` | Field delimiter for non-comma files (use `\t` for tab). |
+| `-d`, `--delim CHAR` | Field delimiter (use `\t` for tab). Defaults to tab for a `.tsv` file, comma otherwise. |
 | `--type Col=int,Other=string` | Override the sampled type inference. |
 | `--output PATH` | Write results (or committed table) to PATH as CSV. |
 

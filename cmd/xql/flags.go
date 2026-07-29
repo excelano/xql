@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -13,10 +14,35 @@ import (
 // identically, so both `xql csv -exec` and `xql csv --exec` still work; only
 // the printed help changes. Layout mirrors stdlib PrintDefaults so column
 // alignment stays consistent with the rest of the help block.
+//
+// A short alias (`-d` for `--delim`) is registered as a second flag bound to
+// the same variable, which makes the two share one Value pointer. Grouping on
+// that pointer lets both spellings print on one line — `-d, --delim` — instead
+// of appearing as two unrelated options.
 func printFlags(w io.Writer, fs *flag.FlagSet) {
+	spellings := map[flag.Value][]string{}
 	fs.VisitAll(func(f *flag.Flag) {
+		spellings[f.Value] = append(spellings[f.Value], f.Name)
+	})
+
+	fs.VisitAll(func(f *flag.Flag) {
+		names := append([]string(nil), spellings[f.Value]...)
+		sort.SliceStable(names, func(i, j int) bool { return len(names[i]) < len(names[j]) })
+		if f.Name != names[len(names)-1] {
+			return // an alias; the longest spelling prints the group's line
+		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "  --%s", f.Name)
+		b.WriteString("  ")
+		for i, n := range names {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			if len(n) == 1 {
+				fmt.Fprintf(&b, "-%s", n)
+			} else {
+				fmt.Fprintf(&b, "--%s", n)
+			}
+		}
 		name, usage := flag.UnquoteUsage(f)
 		if name != "" {
 			b.WriteString(" ")

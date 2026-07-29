@@ -48,9 +48,17 @@ func runCSVImpl(args []string) int {
 		flagOutput         = fs.String("output", "", "Write the statement result to this path as CSV (SELECT rows; or the modified table for committed UPDATE/DELETE/INSERT)")
 		flagNoInputHeader  = fs.Bool("no-input-header", false, "Source CSV has no header row; columns are named col1, col2, ...")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
-		flagDelim          = fs.String("delim", ",", "Single-character field delimiter (use \\t for tab)")
 		flagTypes          = fs.String("type", "", "Comma-separated column type overrides, e.g. Priority=int,Tags=string")
 	)
+
+	// -d and --delim bind the same variable, so either spelling works and the
+	// last one given wins. The default is empty rather than "," so that "not
+	// given" stays distinguishable from an explicit comma; resolveDelim then
+	// infers from the file extension.
+	var flagDelim string
+	const delimUsage = "Single-character field delimiter (use \\t for tab); defaults to ',', or tab for a .tsv file"
+	fs.StringVar(&flagDelim, "delim", "", delimUsage)
+	fs.StringVar(&flagDelim, "d", "", delimUsage)
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: xql csv [flags] <csv-file>")
@@ -74,7 +82,7 @@ func runCSVImpl(args []string) int {
 		return 2
 	}
 
-	delim, err := parseDelim(*flagDelim)
+	delim, err := resolveDelim(flagDelim, csvPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
@@ -203,6 +211,21 @@ func reorderArgs(args []string, fs *flag.FlagSet) []string {
 		}
 	}
 	return append(flags, positional...)
+}
+
+// resolveDelim picks the field delimiter for path. An explicit --delim always
+// wins; otherwise a .tsv file gets tab and everything else gets comma. The
+// extension rule is the one xled and xshape already apply, so a .tsv opens the
+// same way whichever tool in the family reaches for it — without it, `xql
+// data.tsv` silently bound the whole tab-separated line as a single column.
+func resolveDelim(flagValue, path string) (rune, error) {
+	if flagValue != "" {
+		return parseDelim(flagValue)
+	}
+	if strings.EqualFold(filepath.Ext(path), ".tsv") {
+		return '\t', nil
+	}
+	return ',', nil
 }
 
 // parseDelim accepts a single-character delimiter, with `\t` as a special

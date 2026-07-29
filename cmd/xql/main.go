@@ -59,7 +59,7 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 		printUsage(stdout, reg)
 		return 0
 	case "-V", "--version":
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintf(stdout, "xql %s\n", version)
 		return 0
 	}
 

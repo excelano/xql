@@ -170,10 +170,10 @@ Runs one statement and exits. Writes need `--commit`; a bare DELETE (no WHERE cl
 
 ### CSV dialect
 
-By default, the CSV backend expects a header row, comma delimiter, double-quote quoting, and UTF-8. Override with:
+By default, the CSV backend expects a header row, double-quote quoting, and UTF-8. The delimiter comes from the file extension: tab for `.tsv`, comma for everything else. Override with:
 
 - `--no-input-header` — file has no header; columns are named `col1`, `col2`, ...
-- `--delim CHAR` — single-character delimiter other than `,` (use `\t` for tab)
+- `-d`, `--delim CHAR` — single-character delimiter (use `\t` for tab)
 
 A UTF-8 byte-order mark (BOM) at the start of the file — common in Excel's "Save as CSV UTF-8" output — is stripped automatically; the first column name is not prefixed with it. CRLF and LF line endings are both accepted. Fields containing the delimiter, embedded quotes, or embedded newlines work as long as they are properly double-quoted per RFC 4180.
 
