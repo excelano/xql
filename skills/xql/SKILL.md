@@ -15,9 +15,9 @@ Reach for xql when the user has one CSV, one TSV, one SharePoint list, or one xi
 
 Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window functions, or an expression on the right side of a comparison. Those are permanently out of scope by design — xql binds to one table per session. For anything that needs cross-table joins over CSV, use DuckDB. For anything that needs writes across multiple tables, use sqlite3 or the source system's own API.
 
-## Version guard
+## Feature guard
 
-The recipes and flags below assume xql 1.6.0 or newer (which adds `LOWER`/`UPPER`/`TRIM`, expression `GROUP BY`, and the `--describe` flag). Verify with `xql --version`. If the installed copy is older, either upgrade (`sudo apt install --only-upgrade xql` on Debian/Ubuntu, `brew upgrade xql` on macOS, or re-run the install one-liner from the README) or fall back to explicit rewrites (`SELECT column` instead of `SELECT LOWER(column)`).
+The recipes and flags below assume an xql with `LOWER`/`UPPER`/`TRIM`, expression `GROUP BY`, and `--describe`. Check for the last of those in `xql --help` — they shipped together, so its absence means the other two are missing too. If the installed copy predates them, either upgrade (`sudo apt install --only-upgrade xql` on Debian/Ubuntu, `brew upgrade xql` on macOS, or re-run the install one-liner from the README) or fall back to explicit rewrites (`SELECT column` instead of `SELECT LOWER(column)`).
 
 ## Dispatch — how xql picks a backend
 
