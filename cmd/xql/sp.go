@@ -23,6 +23,7 @@ func runSPImpl(args []string) int {
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
 		flagDescribe       = fs.Bool("describe", false, "Print the bound list's column schema and exit; skip the REPL. Combine with --all-fields to include hidden columns")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
+		flagJSON           = fs.Bool("json", false, jsonUsage)
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagAllFields      = fs.Bool("all-fields", false, "Include hidden/system fields in SELECT *")
 		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE (no WHERE) in --exec mode")
@@ -41,6 +42,12 @@ func runSPImpl(args []string) int {
 	}
 
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
+		return 2
+	}
+
+	mode, err := resolveMode(*flagMode, *flagJSON)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
 
@@ -88,7 +95,7 @@ func runSPImpl(args []string) int {
 	exec := &sp.Executor{
 		Graph:              graph,
 		Bound:              bound,
-		Mode:               *flagMode,
+		Mode:               mode,
 		Headers:            !*flagNoOutputHeader,
 		AllFields:          *flagAllFields,
 		ConfirmDestructive: *flagConfirm,

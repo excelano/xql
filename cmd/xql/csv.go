@@ -43,10 +43,10 @@ func runCSVImpl(args []string) int {
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
 		flagDescribe       = fs.Bool("describe", false, "Print the bound table's column schema and exit; skip the REPL")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
+		flagJSON           = fs.Bool("json", false, jsonUsage)
 		flagCommit         = fs.Bool("commit", false, "Commit writes in --exec mode (required for INSERT/UPDATE/DELETE)")
 		flagConfirm        = fs.Bool("confirm-destructive", false, "Required for bare DELETE in --exec mode")
 		flagOutput         = fs.String("output", "", "Write the statement result to this path as CSV (SELECT rows; or the modified table for committed UPDATE/DELETE/INSERT)")
-		flagNoInputHeader  = fs.Bool("no-input-header", false, "Source CSV has no header row; columns are named col1, col2, ...")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 		flagTypes          = fs.String("type", "", "Comma-separated column type overrides, e.g. Priority=int,Tags=string")
 	)
@@ -59,6 +59,15 @@ func runCSVImpl(args []string) int {
 	const delimUsage = "Single-character field delimiter (use \\t for tab); defaults to ',', or tab for a .tsv file"
 	fs.StringVar(&flagDelim, "delim", "", delimUsage)
 	fs.StringVar(&flagDelim, "d", "", delimUsage)
+
+	// --no-header is what xled, xshape, and xray call this, so it works here
+	// too; --no-input-header stays as the primary spelling because it pairs
+	// with --no-output-header, a distinction the other tools don't have to
+	// make. Binding one variable means either spelling sets it.
+	var flagNoInputHeader bool
+	const noInputHeaderUsage = "Source CSV has no header row; columns are named col1, col2, ..."
+	fs.BoolVar(&flagNoInputHeader, "no-input-header", false, noInputHeaderUsage)
+	fs.BoolVar(&flagNoInputHeader, "no-header", false, noInputHeaderUsage)
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: xql csv [flags] <csv-file>")
@@ -88,6 +97,12 @@ func runCSVImpl(args []string) int {
 		return 2
 	}
 
+	mode, err := resolveMode(*flagMode, *flagJSON)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 2
+	}
+
 	hints, err := parseTypeHints(*flagTypes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -98,7 +113,7 @@ func runCSVImpl(args []string) int {
 
 	t, err := csvbackend.LoadCSV(csvPath, csvbackend.LoadOptions{
 		Delim:     delim,
-		NoHeader:  *flagNoInputHeader,
+		NoHeader:  flagNoInputHeader,
 		TypeHints: hints,
 	})
 	if err != nil {
@@ -115,7 +130,7 @@ func runCSVImpl(args []string) int {
 
 	exec := &csvbackend.Executor{
 		Table:              t,
-		Mode:               *flagMode,
+		Mode:               mode,
 		Headers:            !*flagNoOutputHeader,
 		ConfirmDestructive: *flagConfirm,
 		OutputPath:         *flagOutput,

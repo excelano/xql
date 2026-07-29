@@ -61,6 +61,25 @@ func printFlags(w io.Writer, fs *flag.FlagSet) {
 	})
 }
 
+// jsonUsage describes the --json shorthand. Every backend registers the same
+// flag, so the wording lives in one place.
+const jsonUsage = "Emit JSON; shorthand for --mode json"
+
+// resolveMode folds the --json shorthand into --mode. xray spells JSON output
+// --json, so reaching for that spelling here finds it too, while --mode keeps
+// the other three formats addressable. Giving both is fine when they agree and
+// an error when they don't — silently letting one win would make a mistyped
+// pipeline look like it worked.
+func resolveMode(mode string, jsonShorthand bool) (string, error) {
+	if !jsonShorthand {
+		return mode, nil
+	}
+	if mode != "" && !strings.EqualFold(mode, "json") {
+		return "", fmt.Errorf("--json conflicts with --mode %s; give one or the other", mode)
+	}
+	return "json", nil
+}
+
 // isZeroDefaultValue suppresses the "(default ...)" trailer for flags that
 // carry a zero-valued default. Booleans default to false and unset strings
 // to the empty string; showing that trailer would clutter the help.

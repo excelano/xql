@@ -164,7 +164,7 @@ When a write is applied, `xql` rewrites the bound file. Pass `--output FILE` at 
 xql csv <path> --exec "<sql>"
 ```
 
-Runs one statement and exits. Writes need `--commit`; a bare DELETE (no WHERE clause) additionally needs `--confirm-destructive`. Output auto-detects to ASCII table on an interactive terminal and TSV when piped. Override with `--mode=csv` for RFC 4180 CSV, `--mode=json` for JSON, or pass `--no-output-header` to drop the header row in any row-shaped mode.
+Runs one statement and exits. Writes need `--commit`; a bare DELETE (no WHERE clause) additionally needs `--confirm-destructive`. Output auto-detects to ASCII table on an interactive terminal and TSV when piped. Override with `--mode=csv` for RFC 4180 CSV, `--mode=json` (or the shorthand `--json`) for JSON, or pass `--no-output-header` to drop the header row in any row-shaped mode.
 
 `--describe` prints the bound resource's column schema and exits, without entering the REPL and without a SQL statement. On `xql sp`, combine with `--all-fields` to include hidden SharePoint columns.
 
@@ -172,7 +172,7 @@ Runs one statement and exits. Writes need `--commit`; a bare DELETE (no WHERE cl
 
 By default, the CSV backend expects a header row, double-quote quoting, and UTF-8. The delimiter comes from the file extension: tab for `.tsv`, comma for everything else. Override with:
 
-- `--no-input-header` — file has no header; columns are named `col1`, `col2`, ...
+- `--no-input-header`, `--no-header` — file has no header; columns are named `col1`, `col2`, ...
 - `-d`, `--delim CHAR` — single-character delimiter (use `\t` for tab)
 
 A UTF-8 byte-order mark (BOM) at the start of the file — common in Excel's "Save as CSV UTF-8" output — is stripped automatically; the first column name is not prefixed with it. CRLF and LF line endings are both accepted. Fields containing the delimiter, embedded quotes, or embedded newlines work as long as they are properly double-quoted per RFC 4180.

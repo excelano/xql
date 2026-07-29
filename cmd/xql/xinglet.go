@@ -26,6 +26,7 @@ func runXingletImpl(args []string) int {
 		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
 		flagDescribe       = fs.Bool("describe", false, "Print the loaded xinglet's column schema and exit; skip the REPL")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
+		flagJSON           = fs.Bool("json", false, jsonUsage)
 		flagOutput         = fs.String("output", "", "Write SELECT results as CSV to this path")
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 	)
@@ -44,6 +45,12 @@ func runXingletImpl(args []string) int {
 	}
 
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
+		return 2
+	}
+
+	mode, err := resolveMode(*flagMode, *flagJSON)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 2
 	}
 
@@ -95,7 +102,7 @@ func runXingletImpl(args []string) int {
 
 	inner := &csv.Executor{
 		Table:      table,
-		Mode:       *flagMode,
+		Mode:       mode,
 		Headers:    !*flagNoOutputHeader,
 		OutputPath: *flagOutput,
 		Out:        os.Stdout,

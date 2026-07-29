@@ -77,3 +77,39 @@ func TestDelimAliasParsesAndPrintsOnce(t *testing.T) {
 		t.Errorf("help block describes the delimiter %d times, want 1; got:\n%s", n, got)
 	}
 }
+
+// The family spelling --no-header reaches the same switch as the CSV backend's
+// own --no-input-header, and a bool alias stays a bool through reorderArgs (so
+// it never swallows the file path that follows it).
+func TestNoHeaderAliasIsBoolAndBindsTheSameVariable(t *testing.T) {
+	newFS := func(target *bool) *flag.FlagSet {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		fs.SetOutput(&bytes.Buffer{})
+		fs.BoolVar(target, "no-input-header", false, "Source has no header row")
+		fs.BoolVar(target, "no-header", false, "Source has no header row")
+		return fs
+	}
+
+	for _, args := range [][]string{{"--no-header"}, {"--no-input-header"}, {"-no-header"}} {
+		var noHeader bool
+		if err := newFS(&noHeader).Parse(args); err != nil {
+			t.Fatalf("parsing %v: %v", args, err)
+		}
+		if !noHeader {
+			t.Errorf("parsing %v left the header flag unset", args)
+		}
+	}
+
+	var noHeader bool
+	fs := newFS(&noHeader)
+	got := reorderArgs([]string{"--no-header", "data.csv"}, fs)
+	if len(got) != 2 || got[0] != "--no-header" || got[1] != "data.csv" {
+		t.Errorf("reorderArgs treated --no-header as taking a value: %v", got)
+	}
+
+	var out bytes.Buffer
+	printFlags(&out, newFS(&noHeader))
+	if want := "  --no-header, --no-input-header\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("help block missing %q; got:\n%s", want, out.String())
+	}
+}

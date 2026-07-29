@@ -83,15 +83,16 @@ When a write commits, xql rewrites the bound file (CSV) or PATCHes each affected
 | `--commit` | Required to apply writes in `--exec` mode. |
 | `--confirm-destructive` | Required to run a bare `DELETE` in `--exec` mode. |
 | `--mode table\|tsv\|csv\|json` | Output format. Defaults to table on TTY, TSV when piped. |
-| `--no-input-header` | Source has no header; columns become `col1`, `col2`, … |
+| `--json` | Shorthand for `--mode json`. Conflicts with any other `--mode`. |
+| `--no-input-header`, `--no-header` | Source has no header; columns become `col1`, `col2`, … |
 | `--no-output-header` | Suppress the header row in output. |
 | `-d`, `--delim CHAR` | Field delimiter (use `\t` for tab). Defaults to tab for a `.tsv` file, comma otherwise. |
 | `--type Col=int,Other=string` | Override the sampled type inference. |
 | `--output PATH` | Write results (or committed table) to PATH as CSV. |
 
-`xql sp <list-url>` adds `--all-fields` (include hidden/system columns in `SELECT *` and `--describe`). Same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--no-output-header`, `--output` semantics as `csv`.
+`xql sp <list-url>` adds `--all-fields` (include hidden/system columns in `SELECT *` and `--describe`). Same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header`, `--output` semantics as `csv`.
 
-`xql xinglet xinglet://<uuid>` accepts `--exec`, `--describe`, `--mode`, `--no-output-header`, `--output`. `XINGLET_TOKEN` must be set in the environment. No write flags — the backend is read-only.
+`xql xinglet xinglet://<uuid>` accepts `--exec`, `--describe`, `--mode`, `--json`, `--no-output-header`, `--output`. `XINGLET_TOKEN` must be set in the environment. No write flags — the backend is read-only.
 
 ## REPL commands (plain words, no leading `\`)
 
