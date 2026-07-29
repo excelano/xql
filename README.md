@@ -34,6 +34,14 @@ Tabular data lives in many places — CSVs on disk, SharePoint Lists in M365 ten
 
 v1.0 shipped the CSV backend (replacing standalone [sqlcsv](https://github.com/excelano/sqlcsv)). v1.1 adds the SharePoint backend (replacing standalone [spsql](https://github.com/excelano/spsql)). The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
 
+## The tabular family
+
+`xql` is one of four small tools split by **what changes**. [xray](https://github.com/excelano/xray) observes and changes nothing — it profiles a delimited file's shape, types, and hazards before you touch it. [xled](https://github.com/excelano/xled) edits cell *values*: sed's `s///` and a per-row compute layer, applied over Excel-style ranges, never altering the table's shape. [xshape](https://github.com/excelano/xshape) changes the grid's *geometry* — pivot, unpivot, split, explode, merge. `xql` queries the *row set*: filter, aggregate, group, sort, and write back through DML.
+
+The split decides where a job goes. Rewriting the text inside cells by pattern is xled's, even when a `WHERE` would have picked the same rows. Turning one column into several is xshape's. Anything that answers a question *about* the rows — how many, which ones, grouped by what — is `xql`'s. When you land in the wrong tool, the error says which one has the capability rather than just refusing; that routing runs in both directions across the family.
+
+They compose over plain CSV, so a job that needs two of them is a pipeline, not a compromise: profile with `xray`, normalize values with `xled`, then query the result here.
+
 ## Install
 
 ### Debian and Ubuntu
@@ -228,7 +236,7 @@ The xinglist export carries inline column type annotations (`Count:number`, `Joi
 
 ## SQL subset
 
-`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. `GROUP BY` accepts expressions, and the string-normalization scalars `LOWER`, `UPPER`, and `TRIM` are available in both projections and grouping. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
+`xql` implements a deliberately small SQL grammar: `SELECT` and DML with literal values, simple `WHERE` predicates, aggregates, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT`, `OFFSET`. `GROUP BY` accepts expressions, and the scalar functions — `LOWER`, `UPPER`, `TRIM` for string normalization, `YEAR`, `MONTH`, `DAY` for calendar components — are available in projections, predicates, and grouping alike. No JOINs, no subqueries. The same grammar applies across all backends; backend-specific differences (OData translation, identifier resolution, type coercion, read-only mode for `xql xinglet`) are noted inline. See [GRAMMAR.md](GRAMMAR.md) for the full formal grammar and semantics.
 
 Case-insensitive dedup profiling — the canonical use for the scalar functions — reads like this:
 
@@ -240,6 +248,16 @@ ORDER BY n DESC
 ```
 
 `CoStar`, `Costar`, and `costar` collapse into one row.
+
+The date accessors do the same job on a time axis, turning a date column into something groupable:
+
+```sql
+SELECT YEAR(hired) AS y, MONTH(hired) AS m, COUNT(*) AS n
+GROUP BY YEAR(hired), MONTH(hired)
+ORDER BY y, m
+```
+
+They read a `date` column directly, and a `string` column whose values are ISO dates. A cell that isn't a date yields `NULL` for that row rather than failing the query, but a column inferred as `int` or `float` is rejected before the scan starts — Excel would answer with a serial number there, and `xql` has none to give.
 
 Column names are case-insensitive on input — `select * where firstname = 'John'` resolves against a `Firstname` header. Output preserves the canonical header case. If a schema carries two columns that differ only in case (`ID` and `id`), referencing either form returns an ambiguous-column error rather than guessing.
 

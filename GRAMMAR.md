@@ -77,7 +77,11 @@ Multiplication and division bind tighter than addition and subtraction. Parenthe
 
 Aggregates may not nest in standard SQL (`SUM(COUNT(*))` is undefined). The parser accepts the shape and the executor rejects it; this keeps the grammar straightforward.
 
-Scalar functions cover the string-normalization surface: `LOWER(s)`, `UPPER(s)`, and `TRIM(s)`. Each takes a single argument and produces a text result. Unknown names parse cleanly and produce an `unknown function` error at plan time, so mistyped `LOWERR(x)` fails with a clear message rather than a cryptic parse error. Non-string arguments are stringified before the function runs, so `LOWER(id)` on an integer column yields the digits as text.
+Scalar functions cover two surfaces. **String normalization**: `LOWER(s)`, `UPPER(s)`, and `TRIM(s)`, each taking one argument and producing text. Non-string arguments are stringified first, so `LOWER(id)` on an integer column yields the digits as text. **Calendar components**: `YEAR(d)`, `MONTH(d)`, and `DAY(d)`, each producing an integer, which is what makes a date column groupable.
+
+The date accessors accept a `date` column, or a `string` whose value parses as one of the ISO forms below. A string cell that is not a date evaluates to `NULL` for that row rather than failing the query — SQL already has a value for "no answer here", and one bad cell should not abort a scan over the rest. An argument statically typed `int`, `float`, or `bool` is rejected at plan time instead, since it can only ever be wrong; the error names the `--type` override in case inference simply picked wrong. There is deliberately no serial-number interpretation of a numeric column.
+
+Unknown names parse cleanly and produce an `unknown function` error at plan time, so mistyped `LOWERR(x)` fails with a clear message rather than a cryptic parse error. Where the name makes the intent obvious, the error also says where the capability lives: text rewriting (`REPLACE`, `REGEXP_REPLACE`) is xled's, reshaping (`PIVOT`, `UNPIVOT`, `SPLIT_PART`) is xshape's, and the functions xql has not built yet (`LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, `ROUND`) name the xled command that computes the column so it can be queried here.
 
 ## Predicates
 
@@ -201,12 +205,14 @@ UPDATE SET counter = counter + 1 WHERE id = 7
 SELECT * WHERE price * qty > 100
 SELECT LOWER(app_name) AS k, COUNT(*) AS n GROUP BY LOWER(app_name) HAVING COUNT(*) > 1 ORDER BY n DESC
 SELECT UPPER(TRIM(name)) AS canon, COUNT(*) GROUP BY UPPER(TRIM(name))
+SELECT YEAR(hired) AS y, COUNT(*) AS n GROUP BY YEAR(hired) ORDER BY y
+SELECT Title WHERE MONTH(Modified) = 12
 ```
 
 ## Out of scope
 
 Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join externally — for `xql csv` by loading the redirected files in a follow-up session, for `xql sp` by piping the CSVs through `sqlite3`, `xql csv`, or `jq`.
 
-Not implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and scalar functions beyond the string-normalization set — `LENGTH`, `SUBSTRING`, and `YEAR` are not available. These are absences rather than refusals; `xql --help` and this document describe the build you have.
+Not implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and scalar functions beyond the string-normalization and calendar-component sets — `LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, and `ROUND` are not available. These are absences rather than refusals, and each one's error names the xled command that computes the column so the result can be queried here.
 
 No current plan: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions. None are technically impossible, but each adds parser complexity for a use case that has not surfaced yet.

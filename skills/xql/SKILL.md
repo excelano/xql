@@ -17,7 +17,7 @@ Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window 
 
 ## Feature guard
 
-The recipes and flags below assume an xql with `LOWER`/`UPPER`/`TRIM`, expression `GROUP BY`, and `--describe`. Check for the last of those in `xql --help` — they shipped together, so its absence means the other two are missing too. If the installed copy predates them, either upgrade (`sudo apt install --only-upgrade xql` on Debian/Ubuntu, `brew upgrade xql` on macOS, or re-run the install one-liner from the README) or fall back to explicit rewrites (`SELECT column` instead of `SELECT LOWER(column)`).
+The recipes and flags below assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `YEAR`/`MONTH`/`DAY`, expression `GROUP BY`, and `--describe`. An "unknown function" error on one of those names means the installed copy predates it; upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (macOS), or by re-running the install one-liner from the README. Falling back means rewriting explicitly — `SELECT column` instead of `SELECT LOWER(column)`, and grouping on the raw date instead of `YEAR(date)`.
 
 ## Dispatch — how xql picks a backend
 
@@ -54,11 +54,13 @@ Grammar shared across every backend:
 
 Note the absence of `FROM`. The bound table is implicit — `xql csv data.csv` then `SELECT *` is enough.
 
-Projections may include arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `SUM`, `AVG`, `MIN`, `MAX`), and the three string-normalization scalars: `LOWER(s)`, `UPPER(s)`, `TRIM(s)`. Scalars can appear in both the projection list and `GROUP BY` (case-insensitive dedup uses this — see recipe 1). Unknown scalar names produce an "unknown function" error at plan time.
+Projections may include arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `SUM`, `AVG`, `MIN`, `MAX`), and the scalar functions: `LOWER(s)`, `UPPER(s)`, `TRIM(s)` for string normalization, and `YEAR(d)`, `MONTH(d)`, `DAY(d)` for calendar components. Scalars can appear in the projection list, in predicates, and in `GROUP BY` (case-insensitive dedup uses this — see recipe 1). Unknown scalar names produce an "unknown function" error at plan time.
+
+The date accessors take a `date` column or a `string` holding ISO dates; a string cell that isn't a date yields `NULL` for that row, while an `int`/`float` column is rejected before the scan with a pointer at the `--type` override. There is no serial-number reading of a numeric column.
 
 Predicates support `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] ILIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN a AND b`, and boolean composition with `AND`, `OR`, `NOT`. Left side is an expression (`WHERE price * qty > 100` is fine); right side is always a literal (`col1 = col2` is not supported).
 
-Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, `COUNT(DISTINCT col)`, scalar functions beyond `LOWER`/`UPPER`/`TRIM`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
+Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, `COUNT(DISTINCT col)`, and the scalar functions `LENGTH`/`SUBSTRING`/`LEFT`/`RIGHT`/`ROUND`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
 
 Case-insensitive on keywords AND column names on input; output preserves the canonical header case. Two columns that differ only in case (`ID` and `id`) surface as an ambiguous-column error rather than a guess.
 
@@ -159,7 +161,24 @@ Output is TSV when piped, table when interactive. To capture the output to a fil
 xql apps.csv --exec "..." --mode csv --output dupes.csv
 ```
 
-### 2. Bulk-close old SharePoint list items
+### 2. Count by month, and where the date column isn't one
+
+`YEAR`, `MONTH`, and `DAY` turn a date column into something groupable:
+
+```sh
+xql staff.csv --exec "SELECT YEAR(hired) AS y, MONTH(hired) AS m, COUNT(*) AS n GROUP BY YEAR(hired), MONTH(hired) ORDER BY y, m"
+```
+
+This only works if the column actually inferred as `date`, which requires every non-empty value to be ISO. Check with `--describe` first. A column of `03/04/2024` infers as `string`, and `YEAR` on it returns `NULL` for every row rather than guessing whether that is March or April — xql has no more appetite for that guess than xled does.
+
+The fix is to normalize upstream in xled and query the result, which is the family's intended shape for a two-step job:
+
+```sh
+xled '[hired] = date([hired], "DD/MM/YYYY")' staff.csv > staff-iso.csv
+xql staff-iso.csv --exec "SELECT YEAR(hired) AS y, COUNT(*) AS n GROUP BY YEAR(hired)"
+```
+
+### 3. Bulk-close old SharePoint list items
 
 Preview first (no `--commit`), then rerun with the flag once the sample looks right:
 
@@ -174,7 +193,7 @@ The preview prints the affected count and a sample. Rerun with `--commit` append
 xql> UPDATE SET Status = 'Closed' WHERE Modified < '2024-01-01' AND Status != 'Closed' !
 ```
 
-### 3. Schema-first exploration
+### 4. Schema-first exploration
 
 Before writing anything, dump the schema so the query references real column names and types:
 
@@ -185,7 +204,7 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks --describe --all-fi
 
 `--all-fields` on `sp` includes hidden/system columns (Created, Modified, Author, etc.) that are hidden by default to match what the SharePoint UI shows.
 
-### 4. Redirect large SELECT to a file
+### 5. Redirect large SELECT to a file
 
 `--output` writes SELECT results as CSV regardless of the terminal `--mode`:
 
@@ -197,7 +216,7 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Big \
 
 ## Error patterns worth recognizing
 
-- `unknown function: FOO` — mistyped scalar or a function xql doesn't support. Only `LOWER`, `UPPER`, `TRIM` ship today.
+- `unknown function FOO` — mistyped scalar, or a capability that lives in a sibling tool. The message says which: text rewriting (`REPLACE`) routes to xled, reshaping (`PIVOT`, `UNPIVOT`, `SPLIT_PART`) to xshape, and xql's own not-yet functions (`LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, `ROUND`) name the xled command that computes the column so it can be queried here. A bare "unknown function" with no pointer is a plain typo.
 - `ambiguous column: X (internal names: ...)` — two SharePoint columns share a display name. Reference the internal name to disambiguate.
 - `... is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly` — you tried `WHERE LOWER(col) = 'x'` against `sp`. Use `WHERE col ILIKE 'x'` instead.
 - `LIKE pattern has no OData equivalent` — mid-pattern `%` or `_` against `sp`. Rewrite as `startswith`/`endswith`/`contains`-shaped, or fetch the column and filter client-side.
