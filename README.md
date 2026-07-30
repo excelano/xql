@@ -32,7 +32,7 @@ Updated 8 of 8 rows. Wrote tasks.csv.
 
 Tabular data lives in many places — CSVs on disk, SharePoint Lists in M365 tenants, Excel exports, database tables. Editing them in bulk is awkward. Spreadsheet apps choke past a few hundred thousand rows, point-and-click web UIs are not scriptable, and writing a one-off script for each transform is overkill. `xql` is the smallest tool that lets you write one SQL statement, see what it would change, and commit if it is right — against whichever backend matches the data you have in front of you.
 
-v1.0 shipped the CSV backend (replacing standalone [sqlcsv](https://github.com/excelano/sqlcsv)). v1.1 adds the SharePoint backend (replacing standalone [spsql](https://github.com/excelano/spsql)). The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
+v1.0 shipped the CSV backend, replacing a standalone tool called `sqlcsv`. v1.1 adds the SharePoint backend, replacing a standalone tool called `spsql`. Both predecessors are retired and their repositories are closed; `xql` is the only supported path. The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
 
 ## The tabular family
 
