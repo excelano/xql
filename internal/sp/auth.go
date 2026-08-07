@@ -18,6 +18,7 @@ import (
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
+	"golang.org/x/term"
 )
 
 // Azure app registration "Excelano SharePoint tools"
@@ -90,10 +91,29 @@ func NewPublicClient(tokenCachePath string) (public.Client, error) {
 	return c, nil
 }
 
+// interactive reports whether a human is present to read the device code and
+// complete the browser flow. Overridden in tests.
+//
+// stderr is the file descriptor that decides it, because that is where the
+// instructions print: a run whose stderr is redirected to a log has nobody to
+// read the code even when the shell itself is interactive, while the common
+// `xql sp … > out.csv` keeps stderr on the terminal and still works. Testing
+// for a character device instead would also match /dev/null and make the guard
+// misfire under redirect or cron.
+var interactive = func() bool {
+	return term.IsTerminal(int(os.Stderr.Fd()))
+}
+
 // Authenticate returns a usable AuthResult, attempting silent refresh against
 // any cached account first and falling back to interactive device code flow.
 // Device code instructions are printed to stderr so they don't pollute
 // stdout-bound results.
+//
+// The fallback is refused outright when no terminal is attached. Device code
+// is a polling flow: it would print a code nobody can see and then block until
+// the code expires, which for an unattended caller — a script, cron, or a
+// coding agent — is a multi-minute hang ending in failure. Failing in the first
+// second with the command that fixes it is strictly better.
 func Authenticate(ctx context.Context, client public.Client) (public.AuthResult, error) {
 	accounts, err := client.Accounts(ctx)
 	if err == nil && len(accounts) > 0 {
@@ -103,6 +123,12 @@ func Authenticate(ctx context.Context, client public.Client) (public.AuthResult,
 		}
 		// Silent failed (refresh token expired, scopes changed, account
 		// invalidated). Fall through to device code.
+	}
+
+	if !interactive() {
+		return public.AuthResult{}, errors.New(
+			"no cached token, and no terminal is attached to complete device-code sign-in. " +
+				"Run `xql sp <list-url>` once from an interactive terminal to cache a token, then re-run this command")
 	}
 
 	dc, err := client.AcquireTokenByDeviceCode(ctx, defaultScopes)
