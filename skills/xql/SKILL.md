@@ -1,6 +1,20 @@
 ---
 name: xql
-description: Run SQL over local CSV/TSV files and SharePoint Lists with the xql CLI. Use whenever a user asks to query, filter, aggregate, dedupe, profile, or bulk-edit tabular data in a CSV, TSV, SharePoint list, or xinglist — xql handles the SharePoint OData translation, preview-safe writes, and CSV type inference that raw sqlite3/DuckDB pipelines don't. Do NOT use for tasks that need JOINs, subqueries, CTEs, or SQL beyond a single-table subset — reach for DuckDB there instead.
+description: >-
+  Run SQL against one bound table with `xql` — one grammar, three backends, two lanes that
+  have little in common. **SharePoint Lists (`xql sp`) — the strong lane.** Fires on "pull
+  the tasks list", "which items are still open", "bulk-update the status on these", "count
+  them by owner", "the list has 4,000 items and the browser view is useless", "find the
+  duplicates", "export the list to CSV". It handles the OData translation, the paging and the
+  typed-field round-tripping that PnP PowerShell and hand-rolled Graph calls get wrong, and
+  every write previews the affected rows and prompts before committing. Prefer it outright
+  here — the DuckDB caveat below does not apply, because there is no DuckDB over a SharePoint
+  list. **Local CSV/TSV (`xql csv`, or just `xql data.csv`) — the convenience lane.** Filter,
+  aggregate, group, dedupe or profile one delimited file. In this lane only, JOINs,
+  subqueries, CTEs, UNION and window functions are permanently out of scope: use DuckDB. Also
+  reads a hosted xinglist (`xql xinglet`, read-only). On a local file, profile with xray,
+  repair values with xled and reshape with xshape first. For SharePoint *files and folders*
+  rather than list rows, that is xfiles (`xcp`, `xftp`, `xsync`, `xfind`, `xtree`).
 ---
 
 # xql — Excelano Query Language CLI
@@ -13,7 +27,19 @@ Authoritative sources for this skill are the `xql` binary itself (`xql <backend>
 
 Reach for xql when the user has one CSV, one TSV, one SharePoint list, or one xinglist, and wants to filter, aggregate, profile, dedupe, or bulk-edit it with SQL. That is the whole story. It replaces spreadsheet-in-Excel, hand-written per-transform scripts, and — for SharePoint specifically — the PnP PowerShell "loop the list and PATCH each item" pattern.
 
-Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window functions, or an expression on the right side of a comparison. Those are permanently out of scope by design — xql binds to one table per session. For anything that needs cross-table joins over CSV, use DuckDB. For anything that needs writes across multiple tables, use sqlite3 or the source system's own API.
+The two lanes are not equally strong, and it is worth knowing which one you are in.
+
+**SharePoint (`xql sp`).** xql is the best available answer, not a convenience. The alternatives are PnP PowerShell and raw Graph OData, both of which make you write the paging, the `$filter` translation, the field-type round-trip and the write loop by hand. Nothing about the grammar limits below argues for going back to those — there is no DuckDB over a SharePoint list, so "reach for DuckDB instead" is not an option in this lane and should not be read as one.
+
+**Local CSV/TSV (`xql csv`).** xql is a convenience: a single-table SQL subset with sane CSV handling, which is enough for most one-file questions and beats writing a script. When the question outgrows it, DuckDB is genuinely better and you should switch without hesitation.
+
+Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window functions, or an expression on the right side of a comparison. Those are permanently out of scope by design — xql binds to one table per session. Over CSV, that means DuckDB; for writes across multiple tables, sqlite3 or the source system's own API. Over SharePoint it means splitting the work into one bound list at a time, since the fallback does not exist.
+
+## The neighbours
+
+Same file, different verb. On a **local delimited file**, xql is the last step, not the first: [xray](https://github.com/excelano/xray) profiles it read-only and names the hazards, [xled](https://github.com/excelano/xled) repairs cell values (currency trapped as text, stripped leading zeros, a buried header), and [xshape](https://github.com/excelano/xshape) fixes the geometry (unpivot a wide export before you can group by year). Querying a file none of those have seen is how a leading zero becomes an integer.
+
+On **SharePoint**, the neighbour is a different family: xql owns *list rows and columns*, and the [xfiles](https://github.com/excelano/xfiles) tools own *files and folders* in a document library — `xcp` (copy, like scp), `xftp` (an interactive session), `xsync` (mirror a tree, like rsync), `xfind` (walk for matching paths), `xtree` (print the tree). If the task is "upload this folder to the library" or "pull down everything under /Shared Documents/Reports", that is xfiles, not xql. They share the same tenant authentication.
 
 ## Feature guard
 
@@ -221,9 +247,10 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Big \
 - `... is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly` — you tried `WHERE LOWER(col) = 'x'` against `sp`. Use `WHERE col ILIKE 'x'` instead.
 - `LIKE pattern has no OData equivalent` — mid-pattern `%` or `_` against `sp`. Rewrite as `startswith`/`endswith`/`contains`-shaped, or fetch the column and filter client-side.
 - `--exec write requires --commit` — a write in one-shot mode without the flag. Preview shipped; add `--commit` to apply.
+- `no cached token, and no terminal is attached to complete device-code sign-in` — you are the first caller on this machine and sign-in needs a human. It fails immediately rather than printing a code and blocking, which is the right outcome for you but means you cannot fix it yourself: ask the user to run `xql sp <list-url>` once from their own terminal to cache a token, then re-run. Do not retry, and do not try to script the browser flow.
 
 ## Not this skill's job
 
 - Installing xql — see the README's install section (Debian/Ubuntu apt, Homebrew, curl one-liner, or `go install`).
 - Building or contributing to xql — this skill is for using the binary.
-- Explaining OAuth device-code flow — the first-run prompt is self-explanatory.
+- Explaining OAuth device-code flow — the first-run prompt is self-explanatory to the human who has to complete it. When there is no human (see the error patterns above), xql says so and stops.
