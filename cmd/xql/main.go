@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/excelano/xql"
 )
 
 // Backend is the registration record for an XQL backend.
@@ -61,6 +63,12 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 	case "-V", "--version":
 		fmt.Fprintf(stdout, "xql %s\n", resolveVersion())
 		return 0
+	// Terminal actions: they touch the user's skills directory and nothing
+	// else, so no backend is bound and no credential is read on the way through.
+	case "--install-skill":
+		return xql.InstallSkill(resolveVersion())
+	case "--uninstall-skill":
+		return xql.UninstallSkill()
 	}
 
 	// Find the first non-flag token to route on, so `xql --describe data.csv`
