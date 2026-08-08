@@ -44,6 +44,8 @@ They compose over plain CSV, so a job that needs two of them is a pipeline, not 
 
 ## Install
 
+Every install line below ends with `xql --install-skill`. That installs the [Claude Code skill](#claude-code-skill) alongside the binary, which is the one step people reliably skipped when it lived further down the page. Drop it if you do not use Claude Code — the CLI itself does not need it.
+
 ### Debian and Ubuntu
 
 Add the [Excelano apt repository](https://excelano.com/apt/) once (one-time setup):
@@ -55,7 +57,7 @@ curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 Then install it, so `apt upgrade` keeps it current:
 
 ```sh
-sudo apt install xql
+sudo apt install xql && xql --install-skill
 ```
 
 ### Homebrew
@@ -70,7 +72,7 @@ brew trust excelano/tap
 Then install it, so `brew upgrade` keeps it current:
 
 ```sh
-brew install xql
+brew install xql && xql --install-skill
 ```
 
 ### Windows
@@ -79,6 +81,7 @@ With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget 
 
 ```powershell
 winget install Excelano.xql
+xql --install-skill
 ```
 
 Or download the `windows_amd64` zip from the [releases page](https://github.com/excelano/xql/releases) and unzip it.
@@ -112,7 +115,7 @@ XQL_INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/excelano/
 From source (Go 1.24 or later):
 
 ```
-go install github.com/excelano/xql/cmd/xql@latest
+go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
 ```
 
 ### Upgrade
@@ -265,21 +268,17 @@ On the SharePoint backend, columns can be referenced by either their internal na
 
 ## Claude Code skill
 
-An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in [`skills/xql/`](skills/xql/). Drop it into `~/.claude/skills/` so Claude Code auto-loads it when you (or an agent) hit a task that fits xql:
+An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in [`skills/xql/`](skills/xql/). The binary installs it:
 
 ```sh
-git clone https://github.com/excelano/xql.git /tmp/xql-skill && \
-  cp -r /tmp/xql-skill/skills/xql ~/.claude/skills/ && \
-  rm -rf /tmp/xql-skill
+xql --install-skill
 ```
 
-Or, if `xql` is already checked out somewhere on your machine:
+That writes `~/.claude/skills/xql/` and stamps in the version it came from, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `xql --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
-```sh
-cp -r /path/to/xql/skills/xql ~/.claude/skills/
-```
+The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, the curl one-liner, or a build from source.
 
-The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, and steers agents toward DuckDB when the task actually needs JOINs.
+The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, splits the SharePoint and local-CSV lanes so the "reach for DuckDB" caveat lands only where DuckDB is actually an option, and points at xfiles for library *files* rather than list rows.
 
 ## Security
 

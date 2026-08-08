@@ -140,6 +140,10 @@ func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "  xql csv     --help")
 	fmt.Fprintln(w, "  xql sp      --help")
 	fmt.Fprintln(w, "  xql xinglet --help")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Claude Code:")
+	fmt.Fprintln(w, "  --install-skill      install the xql skill into ~/.claude/skills/xql")
+	fmt.Fprintln(w, "  --uninstall-skill    remove it again")
 }
 
 // runCSV, runSP, and runXinglet are thin shims so the Backend table's
