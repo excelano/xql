@@ -12,9 +12,15 @@ The release loop for a new version. Run it from a clean `main` with the working 
 
    If the tag was created by another workflow's `GITHUB_TOKEN` the push trigger will not fire, since GitHub suppresses downstream events for token-created refs. Dispatch by hand in that case: `gh workflow run release.yml -f tag=v1.2.3`.
 
-3. **Add the .debs to the Excelano apt repo.** Download `xql_1.2.3_amd64.deb` and `xql_1.2.3_arm64.deb` from the release, then in `~/excelano-apt/`: `add-deb.sh` each one → `rebuild.sh` (GPG-signs) → `updatesite excelano.com.apt -y`. **Dry-run the rsync first** (`rsync … --delete -n`) and confirm zero deletions before the real push — the apt pool is a superset of live, and a stray `--delete` wipe is the standing hazard. See `feedback_rsync_parent_wipes_subpath`.
+3. **Ship to apt.** This is the channel you install from, so a release that has not reached it is not shipped, whatever the release page says.
+   ```sh
+   apt-ship xql v1.2.3
+   ```
+   It downloads every `.deb` on the release, adds each to the pool, re-signs the indices, previews the rsync, **refuses to deploy if the preview would delete anything**, pushes, and verifies against the live index on both architectures. The tag is optional; with none it takes the latest release. See `feedback_rsync_parent_wipes_subpath` for why the deletion guard exists.
 
-   `updatesite` does not touch git, so commit the apt repo right afterwards or it drifts behind what is actually being served.
+   **This is the step releases lose.** Nothing downstream depends on apt — winget reads the GitHub release directly and ships fine over a release whose apt step never happened — so the failure is silent and everything else looks finished. `fleet -r` is what catches it: an `APT` column reading `behind`, and the `apt-ship` line to fix it.
+
+   `updatesite` is an rsync and does not touch git, but a routine package add leaves nothing to commit either — `dists/` and `pool/` are gitignored build artifacts, which is also why `git status` in the apt repo cannot tell you the step was skipped. Commit the apt repo only when you changed something tracked: a script, `conf/release.conf`, a metapackage `control` file, or the README's curated install hint.
 
 4. **Submit the winget manifest.** winget stores one manifest per version, so every release needs its own PR; there is no update in place. Run komac:
    ```sh
