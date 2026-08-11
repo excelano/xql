@@ -16,15 +16,17 @@ func cmp(c, op string, v Value) *Comparison {
 func cmpE(lhs Expr, op string, v Value) *Comparison {
 	return &Comparison{LExpr: lhs, Op: op, Value: v}
 }
-func isnull(c string, not bool) *NullTest   { return &NullTest{Column: c, Not: not} }
-func and(l, r Predicate) *BinaryOp          { return &BinaryOp{Op: "AND", L: l, R: r} }
-func or(l, r Predicate) *BinaryOp           { return &BinaryOp{Op: "OR", L: l, R: r} }
-func not(p Predicate) *NotOp                { return &NotOp{Inner: p} }
-func iptr(n int) *int                       { return &n }
-func asc(c string) OrderKey                 { return OrderKey{Column: c} }
-func desc(c string) OrderKey                { return OrderKey{Column: c, Desc: true} }
-func like(c, p string, n bool) *LikeOp      { return &LikeOp{Column: c, Pattern: p, Not: n} }
-func ilike(c, p string, n bool) *LikeOp     { return &LikeOp{Column: c, Pattern: p, Not: n, Insensitive: true} }
+func isnull(c string, not bool) *NullTest { return &NullTest{Column: c, Not: not} }
+func and(l, r Predicate) *BinaryOp        { return &BinaryOp{Op: "AND", L: l, R: r} }
+func or(l, r Predicate) *BinaryOp         { return &BinaryOp{Op: "OR", L: l, R: r} }
+func not(p Predicate) *NotOp              { return &NotOp{Inner: p} }
+func iptr(n int) *int                     { return &n }
+func asc(c string) OrderKey               { return OrderKey{Column: c} }
+func desc(c string) OrderKey              { return OrderKey{Column: c, Desc: true} }
+func like(c, p string, n bool) *LikeOp    { return &LikeOp{Column: c, Pattern: p, Not: n} }
+func ilike(c, p string, n bool) *LikeOp {
+	return &LikeOp{Column: c, Pattern: p, Not: n, Insensitive: true}
+}
 func in(c string, vs []Value, n bool) *InOp { return &InOp{Column: c, Values: vs, Not: n} }
 func between(c string, lo, hi Value, n bool) *BetweenOp {
 	return &BetweenOp{Column: c, Low: lo, High: hi, Not: n}
@@ -111,7 +113,7 @@ func TestParse(t *testing.T) {
 			input: "SELECT DISTINCT Status WHERE Priority > 2",
 			want: &SelectStmt{
 				Distinct: true,
-				Columns: cols("Status"),
+				Columns:  cols("Status"),
 				Where:    cmp("Priority", ">", vnum("2")),
 			},
 		},
@@ -162,7 +164,7 @@ func TestParse(t *testing.T) {
 			input: "SELECT DISTINCT Status WHERE Priority > 2 ORDER BY Status DESC LIMIT 3 OFFSET 1",
 			want: &SelectStmt{
 				Distinct: true,
-				Columns: cols("Status"),
+				Columns:  cols("Status"),
 				Where:    cmp("Priority", ">", vnum("2")),
 				OrderBy:  []OrderKey{desc("Status")},
 				Limit:    iptr(3),
@@ -258,24 +260,24 @@ func TestParse(t *testing.T) {
 
 		// IN
 		{
-			name: "in single value",
+			name:  "in single value",
 			input: "SELECT * WHERE Status IN ('Open')",
-			want: &SelectStmt{Star: true, Where: in("Status", []Value{vstr("Open")}, false)},
+			want:  &SelectStmt{Star: true, Where: in("Status", []Value{vstr("Open")}, false)},
 		},
 		{
-			name: "in multiple values",
+			name:  "in multiple values",
 			input: "SELECT * WHERE Status IN ('Open', 'In Progress', 'Done')",
 			want: &SelectStmt{Star: true, Where: in("Status",
 				[]Value{vstr("Open"), vstr("In Progress"), vstr("Done")}, false)},
 		},
 		{
-			name: "in numbers",
+			name:  "in numbers",
 			input: "SELECT * WHERE Priority IN (1, 2, 3)",
 			want: &SelectStmt{Star: true, Where: in("Priority",
 				[]Value{vnum("1"), vnum("2"), vnum("3")}, false)},
 		},
 		{
-			name: "not in",
+			name:  "not in",
 			input: "SELECT * WHERE Status NOT IN ('Archived', 'Cancelled')",
 			want: &SelectStmt{Star: true, Where: in("Status",
 				[]Value{vstr("Archived"), vstr("Cancelled")}, true)},
@@ -320,7 +322,7 @@ func TestParse(t *testing.T) {
 
 		// Combinations with AND/OR
 		{
-			name: "between inside and",
+			name:  "between inside and",
 			input: "SELECT * WHERE Priority BETWEEN 1 AND 5 AND Status = 'Open'",
 			want: &SelectStmt{Star: true, Where: and(
 				between("Priority", vnum("1"), vnum("5"), false),
@@ -328,7 +330,7 @@ func TestParse(t *testing.T) {
 			)},
 		},
 		{
-			name: "like and in",
+			name:  "like and in",
 			input: "SELECT * WHERE Title LIKE 'Fix%' AND Status IN ('Open', 'Done')",
 			want: &SelectStmt{Star: true, Where: and(
 				like("Title", "Fix%", false),

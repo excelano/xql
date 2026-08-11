@@ -46,7 +46,6 @@ func TestInferColumn(t *testing.T) {
 	}
 }
 
-
 func TestLoadSaveRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "in.csv")
@@ -261,4 +260,3 @@ func keysOf(m map[string]cell.ColumnInfo) []string {
 	}
 	return out
 }
-

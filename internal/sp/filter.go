@@ -16,7 +16,7 @@ const ODataFieldPrefix = "fields/"
 // ToOData converts a parsed Predicate to a Microsoft Graph $filter expression.
 // Column references are verified against schema (keyed by internal name) and
 // formatted with the fields/ prefix. Values are emitted in OData v4 form:
-// single-quoted strings (with '' escape), bare numbers, lowercase booleans,
+// single-quoted strings (with ” escape), bare numbers, lowercase booleans,
 // and bare ISO 8601 datetimes. Date-only strings on DateTime columns are
 // normalized to full RFC3339 in UTC.
 //

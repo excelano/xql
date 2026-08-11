@@ -18,10 +18,10 @@ func mustDate(s string) time.Time {
 // package parse and aren't exported, so internal/eval tests carry their own
 // copy. Keeping them tiny and centralized matches the cell_test.go pattern.
 
-func vstr(s string) parse.Value  { return parse.Value{Kind: parse.ValString, Str: s} }
-func vnum(n string) parse.Value  { return parse.Value{Kind: parse.ValNumber, Num: n} }
-func vbool(b bool) parse.Value   { return parse.Value{Kind: parse.ValBool, Bool: b} }
-func vnull() parse.Value         { return parse.Value{Kind: parse.ValNull} }
+func vstr(s string) parse.Value { return parse.Value{Kind: parse.ValString, Str: s} }
+func vnum(n string) parse.Value { return parse.Value{Kind: parse.ValNumber, Num: n} }
+func vbool(b bool) parse.Value  { return parse.Value{Kind: parse.ValBool, Bool: b} }
+func vnull() parse.Value        { return parse.Value{Kind: parse.ValNull} }
 
 func cmp(c, op string, v parse.Value) *parse.Comparison {
 	return &parse.Comparison{LExpr: &parse.ColumnExpr{Name: c}, Op: op, Value: v}
@@ -47,8 +47,8 @@ func between(c string, lo, hi parse.Value, n bool) *parse.BetweenOp {
 	return &parse.BetweenOp{Column: c, Low: lo, High: hi, Not: n}
 }
 
-func colE(name string) parse.Expr          { return &parse.ColumnExpr{Name: name} }
-func litE(v parse.Value) parse.Expr        { return &parse.LiteralExpr{Value: v} }
+func colE(name string) parse.Expr   { return &parse.ColumnExpr{Name: name} }
+func litE(v parse.Value) parse.Expr { return &parse.LiteralExpr{Value: v} }
 func binE(op string, l, r parse.Expr) parse.Expr {
 	return &parse.BinaryExpr{Op: op, L: l, R: r}
 }

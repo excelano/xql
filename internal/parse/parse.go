@@ -1197,13 +1197,13 @@ func (p *parser) parseNegation() (Predicate, error) {
 
 // parseAtom is one predicate leaf. The grammar:
 //
-//   atom := '(' predicate ')'
-//        | <expr> IS [NOT] NULL                  // <expr> must be a column
-//        | <expr> [NOT] LIKE 'pattern'           // <expr> must be a column
-//        | <expr> [NOT] ILIKE 'pattern'          // <expr> must be a column
-//        | <expr> [NOT] IN (v, ...)              // <expr> must be a column
-//        | <expr> [NOT] BETWEEN low AND high     // <expr> must be a column
-//        | <expr> <cmp-op> <literal>             // <expr> is unconstrained
+//	atom := '(' predicate ')'
+//	     | <expr> IS [NOT] NULL                  // <expr> must be a column
+//	     | <expr> [NOT] LIKE 'pattern'           // <expr> must be a column
+//	     | <expr> [NOT] ILIKE 'pattern'          // <expr> must be a column
+//	     | <expr> [NOT] IN (v, ...)              // <expr> must be a column
+//	     | <expr> [NOT] BETWEEN low AND high     // <expr> must be a column
+//	     | <expr> <cmp-op> <literal>             // <expr> is unconstrained
 //
 // The column-only constraint for IS / LIKE / IN / BETWEEN is enforced after
 // the LHS is parsed so the error points at the bad expression, not the op.

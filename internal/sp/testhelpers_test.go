@@ -5,10 +5,10 @@ import "github.com/excelano/xql/internal/parse"
 // Test fixture builders that wrap parse.* constructors. Mirrors the helpers
 // in internal/parse/parse_test.go so each predicate is one short call.
 
-func vstr(s string) parse.Value  { return parse.Value{Kind: parse.ValString, Str: s} }
-func vnum(n string) parse.Value  { return parse.Value{Kind: parse.ValNumber, Num: n} }
-func vbool(b bool) parse.Value   { return parse.Value{Kind: parse.ValBool, Bool: b} }
-func vnull() parse.Value         { return parse.Value{Kind: parse.ValNull} }
+func vstr(s string) parse.Value { return parse.Value{Kind: parse.ValString, Str: s} }
+func vnum(n string) parse.Value { return parse.Value{Kind: parse.ValNumber, Num: n} }
+func vbool(b bool) parse.Value  { return parse.Value{Kind: parse.ValBool, Bool: b} }
+func vnull() parse.Value        { return parse.Value{Kind: parse.ValNull} }
 func litE(v parse.Value) parse.Expr {
 	return &parse.LiteralExpr{Value: v}
 }

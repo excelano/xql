@@ -499,7 +499,7 @@ func ValidateAggregate(a *parse.AggregateExpr, schema map[string]cell.ColumnInfo
 // produces the aggregated result. The state union is wide enough to cover
 // every function — each one reads only the fields its semantics require.
 type AggSlot struct {
-	Agg *parse.AggregateExpr
+	Agg     *parse.AggregateExpr
 	ArgType cell.ColumnType
 
 	count      int64

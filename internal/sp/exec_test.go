@@ -228,9 +228,9 @@ func TestApplyOffsetLimit(t *testing.T) {
 	hundred := 100
 	zero := 0
 	cases := []struct {
-		name               string
-		offset, limit      *int
-		wantLen            int
+		name                string
+		offset, limit       *int
+		wantLen             int
 		wantFirst, wantLast int
 	}{
 		{"no clauses", nil, nil, 5, 1, 5},
