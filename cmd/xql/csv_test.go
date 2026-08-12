@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"flag"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -111,5 +113,83 @@ func TestNoHeaderAliasIsBoolAndBindsTheSameVariable(t *testing.T) {
 	printFlags(&out, newFS(&noHeader))
 	if want := "  --no-header, --no-input-header\n"; !strings.Contains(out.String(), want) {
 		t.Errorf("help block missing %q; got:\n%s", want, out.String())
+	}
+}
+
+// withStdin runs fn with os.Stdin replaced by a pipe carrying input, so the
+// `-` path can be exercised end to end.
+func withStdin(t *testing.T, input string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	saved := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = saved; r.Close() }()
+	go func() {
+		_, _ = io.WriteString(w, input)
+		w.Close()
+	}()
+	fn()
+}
+
+// quiet swallows whatever the backend writes while fn runs, so a test that is
+// only asserting on an exit code doesn't scribble over the test log.
+func quiet(t *testing.T, fn func()) {
+	t.Helper()
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("devnull: %v", err)
+	}
+	defer devnull.Close()
+	outSaved, errSaved := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = devnull, devnull
+	defer func() { os.Stdout, os.Stderr = outSaved, errSaved }()
+	fn()
+}
+
+func TestDashReadsTheTableFromStdin(t *testing.T) {
+	const table = "id,name,qty\n007,Ann,5\n008,Bob,3\n"
+
+	t.Run("a statement over stdin succeeds", func(t *testing.T) {
+		var code int
+		withStdin(t, table, func() {
+			quiet(t, func() { code = runCSVImpl([]string{"-", "--exec", "SELECT *"}) })
+		})
+		if code != 0 {
+			t.Errorf("exit = %d, want 0", code)
+		}
+	})
+
+	// Without --exec or --describe the backend would open a REPL on the same
+	// stream the table just came from, so it is refused rather than hung on.
+	t.Run("stdin with no statement is refused", func(t *testing.T) {
+		var code int
+		quiet(t, func() { code = runCSVImpl([]string{"-"}) })
+		if code != 2 {
+			t.Errorf("exit = %d, want 2", code)
+		}
+	})
+
+	// There is no file behind stdin to write a committed change back to.
+	t.Run("committing from stdin needs an output path", func(t *testing.T) {
+		var code int
+		quiet(t, func() {
+			code = runCSVImpl([]string{"-", "--exec", `UPDATE SET name = "Z"`, "--commit"})
+		})
+		if code != 2 {
+			t.Errorf("exit = %d, want 2", code)
+		}
+	})
+}
+
+func TestBackendHelpIsSuccess(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}} {
+		var code int
+		quiet(t, func() { code = runCSVImpl(args) })
+		if code != 0 {
+			t.Errorf("runCSVImpl(%q) = %d, want 0", args, code)
+		}
 	}
 }

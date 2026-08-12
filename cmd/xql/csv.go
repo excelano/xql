@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,13 +70,21 @@ func runCSVImpl(args []string) int {
 	fs.BoolVar(&flagNoInputHeader, "no-input-header", false, noInputHeaderUsage)
 	fs.BoolVar(&flagNoInputHeader, "no-header", false, noInputHeaderUsage)
 
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: xql csv [flags] <csv-file>")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Flags:")
-		printFlags(os.Stderr, fs)
+	usage := func(w io.Writer) {
+		fmt.Fprintln(w, "Usage: xql csv [flags] <csv-file>")
+		fmt.Fprintln(w, "       xql csv - --exec <statement>      (read the table from stdin)")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Flags:")
+		printFlags(w, fs)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, exitCodesBlock)
 	}
+	fs.Usage = func() { usage(os.Stderr) }
 
+	if helpRequested(args, fs) {
+		usage(os.Stdout)
+		return 0
+	}
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
 		return 2
 	}
@@ -109,13 +118,34 @@ func runCSVImpl(args []string) int {
 		return 2
 	}
 
-	warnIfNonUTF8(csvPath)
+	// `-` is the family's spelling for stdin, but a table read from stdin
+	// consumes the stream the REPL would take its commands from, and there is
+	// no file behind it to write a committed change back to. Both are refused
+	// up front rather than discovered halfway through.
+	fromStdin := csvPath == "-"
+	if fromStdin {
+		if *flagExec == "" && !*flagDescribe {
+			fmt.Fprintln(os.Stderr, "xql: reading the table from stdin leaves nothing for the REPL to read from; give --exec or --describe")
+			return 2
+		}
+		if *flagCommit && *flagOutput == "" {
+			fmt.Fprintln(os.Stderr, "xql: --commit needs somewhere to write when the table came from stdin; give --output PATH")
+			return 2
+		}
+	}
 
-	t, err := csvbackend.LoadCSV(csvPath, csvbackend.LoadOptions{
+	loadOpts := csvbackend.LoadOptions{
 		Delim:     delim,
 		NoHeader:  flagNoInputHeader,
 		TypeHints: hints,
-	})
+	}
+	var t *cell.Table
+	if fromStdin {
+		t, err = csvbackend.LoadCSVReader("(stdin)", os.Stdin, loadOpts)
+	} else {
+		warnIfNonUTF8(csvPath)
+		t, err = csvbackend.LoadCSV(csvPath, loadOpts)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xql: could not load CSV: %v\n", err)
 		return 1
@@ -200,12 +230,7 @@ func configDir() string {
 // set of boolean flags is discovered from fs itself so adding a new flag
 // doesn't also require an edit here.
 func reorderArgs(args []string, fs *flag.FlagSet) []string {
-	boolFlag := map[string]bool{}
-	fs.VisitAll(func(f *flag.Flag) {
-		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
-			boolFlag[f.Name] = true
-		}
-	})
+	boolFlag := boolFlags(fs)
 
 	var flags, positional []string
 	for i := 0; i < len(args); i++ {

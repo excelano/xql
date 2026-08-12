@@ -142,7 +142,19 @@ func TestDispatch(t *testing.T) {
 		{
 			name: "only-flags input is an error",
 			args: []string{"--describe"},
-			want: want{code: 2, stderrSubstr: "no subcommand or file given"},
+			want: want{code: 2, stderrSubstr: "every argument was a flag"},
+		},
+		{
+			// A near-miss on a global flag earns a correction; a backend flag
+			// given without a backend does not, because it does exist.
+			name: "a mistyped global flag is corrected",
+			args: []string{"--verison"},
+			want: want{code: 2, stderrSubstr: "did you mean --version?"},
+		},
+		{
+			name: "a bare dash cannot infer a backend",
+			args: []string{"-", "--exec", "SELECT 1"},
+			want: want{code: 2, stderrSubstr: "no extension to infer a backend from"},
 		},
 	}
 

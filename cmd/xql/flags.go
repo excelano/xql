@@ -90,3 +90,51 @@ func isZeroDefaultValue(f *flag.Flag) bool {
 	}
 	return false
 }
+
+// exitCodesBlock is the contract every xql usage block ends with. A caller
+// that branches on the number rather than on the message needs to know that a
+// query matching no rows is a success, not a failure: the empty result is the
+// answer.
+const exitCodesBlock = `Exit codes:
+  0  success, including a query that matched nothing
+  1  bad input -- unreadable source, a parse error, a rejected statement
+  2  bad invocation -- unknown flag, missing argument, contradictory options`
+
+// boolFlags reports which of fs's flags take no value, so an argument walk can
+// tell `--exec SELECT ...` (flag plus value) from `--json FILE` (flag, then a
+// positional).
+func boolFlags(fs *flag.FlagSet) map[string]bool {
+	out := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) {
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			out[f.Name] = true
+		}
+	})
+	return out
+}
+
+// helpRequested reports whether args asks for help in flag position. Go's flag
+// package treats -h/--help as a parse error, which would put an explicit help
+// request on the failure exit; catching it here keeps it a success. Walking the
+// arguments (rather than scanning for the string) means `--exec "--help"` is
+// read as the statement it is.
+func helpRequested(args []string, fs *flag.FlagSet) bool {
+	isBool := boolFlags(fs)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			continue
+		}
+		name := strings.TrimLeft(a, "-")
+		if name == "h" || name == "help" {
+			return true
+		}
+		if strings.ContainsRune(name, '=') {
+			continue
+		}
+		if !isBool[name] && i+1 < len(args) {
+			i++ // skip the flag's value so it is never mistaken for a flag
+		}
+	}
+	return false
+}

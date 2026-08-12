@@ -75,17 +75,32 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 	// works the same as `xql data.csv --describe`. Leading `-flag` tokens
 	// (other than -h/--help/-V/--version, already handled above) get skipped
 	// here; each backend's flag parser handles the eventual reordering via
-	// reorderArgs, so the leading flag still binds correctly downstream.
+	// reorderArgs, so the leading flag still binds correctly downstream. A lone
+	// `-` is the family's spelling for stdin, so it routes rather than skips.
 	routeIdx := 0
-	for routeIdx < len(args) && strings.HasPrefix(args[routeIdx], "-") {
+	for routeIdx < len(args) && strings.HasPrefix(args[routeIdx], "-") && args[routeIdx] != "-" {
 		routeIdx++
 	}
 	if routeIdx >= len(args) {
-		fmt.Fprintln(stderr, "xql: no subcommand or file given (only flags).")
-		printUsage(stderr, reg)
+		fmt.Fprintf(stderr, "xql: no backend or file given — every argument was a flag (%s).\n",
+			strings.Join(quoteAll(args), ", "))
+		fmt.Fprintln(stderr, "A flag alone does not select a backend: write `xql csv FILE ...` or `xql FILE ...`.")
+		// Only offer a correction for a near-miss on a global flag. Most flags
+		// that land here are real backend flags given without a backend, and
+		// telling their owner they do not exist would be wrong.
+		if near := nearestGlobal(args[0]); near != "" {
+			fmt.Fprintf(stderr, "If %q was meant as a global flag, did you mean %s?\n", args[0], near)
+		}
 		return 2
 	}
 	route := args[routeIdx]
+
+	// stdin carries no extension, so there is nothing to infer a backend from.
+	if route == "-" {
+		fmt.Fprintln(stderr, "xql: `-` reads stdin, but stdin has no extension to infer a backend from.")
+		fmt.Fprintln(stderr, "Name the backend: `xql csv - --exec \"SELECT ...\"`.")
+		return 2
+	}
 
 	for _, b := range reg {
 		if route == b.Name {
@@ -117,6 +132,56 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 	return 2
 }
 
+// globalFlags are the flags dispatch handles itself, before any backend is
+// bound. They are the only candidates for a did-you-mean on an argument list
+// that turned out to be nothing but flags.
+var globalFlags = []string{"--help", "--version", "--install-skill", "--uninstall-skill"}
+
+// nearestGlobal names the global flag closest to arg, or "" if none is close.
+// The bar is two edits, which catches the realistic typo — a transposition
+// (`--verison`) or a dropped letter (`--instal-skill`) — without inventing a
+// suggestion for a flag that legitimately belongs to a backend.
+func nearestGlobal(arg string) string {
+	want := strings.TrimLeft(arg, "-")
+	best, bestDist := "", 3
+	for _, g := range globalFlags {
+		if d := editDistance(want, strings.TrimLeft(g, "-")); d < bestDist {
+			best, bestDist = g, d
+		}
+	}
+	return best
+}
+
+// editDistance is Levenshtein over bytes. Flag names are ASCII, so byte
+// distance and rune distance are the same thing here.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
+func quoteAll(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = fmt.Sprintf("%q", a)
+	}
+	return out
+}
+
 // Stamped at build time via -ldflags by goreleaser.
 var version = "(devel)"
 
@@ -144,6 +209,8 @@ func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "Claude Code:")
 	fmt.Fprintln(w, "  --install-skill      install the xql skill into ~/.claude/skills/xql")
 	fmt.Fprintln(w, "  --uninstall-skill    remove it again")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, exitCodesBlock)
 }
 
 // runCSV, runSP, and runXinglet are thin shims so the Backend table's

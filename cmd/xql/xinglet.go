@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -31,19 +32,26 @@ func runXingletImpl(args []string) int {
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 	)
 
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: xql xinglet [flags] xinglet://<uuid>")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Flags:")
-		printFlags(os.Stderr, fs)
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Environment:")
-		fmt.Fprintln(os.Stderr, "  XINGLET_TOKEN     Bearer token (required). Mint at <base>/home/tokens.php.")
-		fmt.Fprintln(os.Stderr, "  XINGLET_BASE_URL  Server base URL (default https://xinglet.com).")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "The xinglet backend is read-only; INSERT/UPDATE/DELETE are rejected.")
+	usage := func(w io.Writer) {
+		fmt.Fprintln(w, "Usage: xql xinglet [flags] xinglet://<uuid>")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Flags:")
+		printFlags(w, fs)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Environment:")
+		fmt.Fprintln(w, "  XINGLET_TOKEN     Bearer token (required). Mint at <base>/home/tokens.php.")
+		fmt.Fprintln(w, "  XINGLET_BASE_URL  Server base URL (default https://xinglet.com).")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "The xinglet backend is read-only; INSERT/UPDATE/DELETE are rejected.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, exitCodesBlock)
 	}
+	fs.Usage = func() { usage(os.Stderr) }
 
+	if helpRequested(args, fs) {
+		usage(os.Stdout)
+		return 0
+	}
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
 		return 2
 	}

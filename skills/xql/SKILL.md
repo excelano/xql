@@ -69,6 +69,23 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks
 xql xinglet xinglet://4babff02-909f-4dba-b3df-3edf14b778bf
 ```
 
+`-` reads the table from stdin, but only after an explicit `csv`, because stdin carries no
+extension for step 2 to infer from. It also needs `--exec` or `--describe`: the REPL would
+otherwise be reading its commands from the stream the table just came out of. A committed
+write from stdin needs `--output PATH`, since there is no source file to write back to.
+
+```
+cat data.csv | xql csv - --exec "SELECT * WHERE qty > 10"
+```
+
+## Exit codes
+
+`0` is success, and that includes a query matching no rows — an empty result is the answer,
+not a failure, so read the row count rather than the exit status. `1` is bad input: an
+unreadable source, a parse error, a statement the backend rejects, a failed sign-in. `2` is a
+bad invocation: an unknown flag, a missing argument, contradictory options. `--help` at any
+level, including `xql csv --help`, is a success and prints to stdout.
+
 ## SQL subset — what's in and what's out
 
 Grammar shared across every backend:
@@ -117,6 +134,8 @@ When a write commits, xql rewrites the bound file (CSV) or PATCHes each affected
 | `-d`, `--delim CHAR` | Field delimiter (use `\t` for tab). Defaults to tab for a `.tsv` file, comma otherwise. |
 | `--type Col=int,Other=string` | Override the sampled type inference. |
 | `--output PATH` | Write results (or committed table) to PATH as CSV. |
+
+The path may be `-` for stdin; see the dispatch section for the two conditions that come with it.
 
 `xql sp <list-url>` adds `--all-fields` (include hidden/system columns in `SELECT *` and `--describe`). Same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header`, `--output` semantics as `csv`.
 

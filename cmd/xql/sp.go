@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -31,16 +32,23 @@ func runSPImpl(args []string) int {
 		flagNoOutputHeader = fs.Bool("no-output-header", false, "Suppress the header row in output (table, tsv, csv modes)")
 	)
 
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: xql sp [flags] <list-url>")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Flags:")
-		printFlags(os.Stderr, fs)
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
-		fmt.Fprintln(os.Stderr, "~/.config/xql/sp-token.json.")
+	usage := func(w io.Writer) {
+		fmt.Fprintln(w, "Usage: xql sp [flags] <list-url>")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Flags:")
+		printFlags(w, fs)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
+		fmt.Fprintln(w, "~/.config/xql/sp-token.json.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, exitCodesBlock)
 	}
+	fs.Usage = func() { usage(os.Stderr) }
 
+	if helpRequested(args, fs) {
+		usage(os.Stdout)
+		return 0
+	}
 	if err := fs.Parse(reorderArgs(args, fs)); err != nil {
 		return 2
 	}
