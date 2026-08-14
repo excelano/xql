@@ -64,6 +64,7 @@ term          := factor ( ( "*" | "/" ) factor )*
 factor        := column | literal | aggregate | scalar_func | "(" expr ")"
 
 aggregate     := "COUNT" "(" "*" ")"
+               | "COUNT" "(" "DISTINCT" expr ")"
                | ( "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" ) "(" expr ")"
 
 scalar_func   := identifier "(" ( expr ( "," expr )* )? ")"
@@ -76,6 +77,8 @@ Multiplication and division bind tighter than addition and subtraction. Parenthe
 `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` are recognized as aggregates only when followed by `(`. Anywhere else they parse as bare identifiers, so a column literally named `min` or `count` can still be projected without quoting.
 
 Aggregates may not nest in standard SQL (`SUM(COUNT(*))` is undefined). The parser accepts the shape and the executor rejects it; this keeps the grammar straightforward.
+
+`COUNT(DISTINCT expr)` counts unique non-NULL values. NULLs are skipped, as they are for a plain `COUNT(col)`, which is the difference from piping `SELECT DISTINCT` into a line count: that counts the NULL group as a value and reads one higher unless the query also says `IS NOT NULL`. Each distinct count keeps its own set, and under `GROUP BY` each group keeps its own, so `COUNT(DISTINCT a), COUNT(DISTINCT b)` in one query is two independent sets. `DISTINCT` is accepted only in `COUNT` — `SUM(DISTINCT x)` is legal SQL and simply not implemented, and says so. One expression only: multi-column `COUNT(DISTINCT a, b)` needs a tuple comparison this grammar has nowhere else, and is refused by name rather than failing as a missing `)`.
 
 Scalar functions cover two surfaces. **String normalization**: `LOWER(s)`, `UPPER(s)`, and `TRIM(s)`, each taking one argument and producing text. Non-string arguments are stringified first, so `LOWER(id)` on an integer column yields the digits as text. **Calendar components**: `YEAR(d)`, `MONTH(d)`, and `DAY(d)`, each producing an integer, which is what makes a date column groupable.
 
@@ -213,6 +216,6 @@ SELECT Title WHERE MONTH(Modified) = 12
 
 Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join externally — for `xql csv` by loading the redirected files in a follow-up session, for `xql sp` by piping the CSVs through `sqlite3`, `xql csv`, or `jq`.
 
-Not implemented: `ORDER BY` with expressions, `COUNT(DISTINCT col)`, and scalar functions beyond the string-normalization and calendar-component sets — `LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, and `ROUND` are not available. These are absences rather than refusals, and each one's error names the xled command that computes the column so the result can be queried here.
+Not implemented: `ORDER BY` with expressions, multi-column `COUNT(DISTINCT a, b)`, `DISTINCT` in aggregates other than `COUNT`, and scalar functions beyond the string-normalization and calendar-component sets — `LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, and `ROUND` are not available. These are absences rather than refusals, and each one's error names the xled command that computes the column so the result can be queried here.
 
 No current plan: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions. None are technically impossible, but each adds parser complexity for a use case that has not surfaced yet.

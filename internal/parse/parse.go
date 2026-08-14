@@ -96,12 +96,14 @@ type BinaryExpr struct {
 }
 
 // AggregateExpr is one of COUNT, SUM, AVG, MIN, MAX. Star is true only for
-// COUNT(*); Arg is meaningful otherwise. Nested aggregates and DISTINCT
-// arguments are not enforced at parse time — the executor decides.
+// COUNT(*); Arg is meaningful otherwise. Distinct is true for
+// COUNT(DISTINCT col), which counts unique non-NULL values. Nested aggregates
+// are not enforced at parse time — the executor decides.
 type AggregateExpr struct {
-	Func string
-	Star bool
-	Arg  Expr
+	Func     string
+	Star     bool
+	Distinct bool
+	Arg      Expr
 }
 
 // FuncCallExpr is a scalar function call: NAME(arg1, arg2, ...). Name is the
@@ -1090,8 +1092,8 @@ func (p *parser) parseFactor() (Expr, error) {
 }
 
 // parseAggregateBody is called after the function name and '(' have been
-// consumed. Handles COUNT(*) specially; for the other aggregates a single
-// argument expression is required.
+// consumed. Handles COUNT(*) and COUNT(DISTINCT expr) specially; for the other
+// aggregates a single argument expression is required.
 func (p *parser) parseAggregateBody(fn string) (Expr, error) {
 	if _, ok := p.accept(TokStar); ok {
 		if fn != "COUNT" {
@@ -1102,14 +1104,31 @@ func (p *parser) parseAggregateBody(fn string) (Expr, error) {
 		}
 		return &AggregateExpr{Func: fn, Star: true}, nil
 	}
+	// DISTINCT is accepted here for any aggregate name and rejected below for
+	// all but COUNT, so the error names the function rather than reporting an
+	// unexpected keyword. SUM(DISTINCT x) is legal SQL and simply not
+	// implemented; saying so is more use than a parse error.
+	distinct := false
+	if _, ok := p.accept(TokDistinct); ok {
+		distinct = true
+		if fn != "COUNT" {
+			return nil, parseErrorAt(p.peek().Pos, fmt.Sprintf("DISTINCT is supported only in COUNT; %s(DISTINCT ...) is not implemented", fn))
+		}
+	}
 	arg, err := p.parseExpr()
 	if err != nil {
 		return nil, err
 	}
+	// One expression only. Multi-column COUNT(DISTINCT a, b) needs a tuple
+	// comparison this grammar has nowhere else, so it is refused by name
+	// instead of failing as a missing ')'.
+	if distinct && p.peek().Type == TokComma {
+		return nil, parseErrorAt(p.peek().Pos, "COUNT(DISTINCT ...) takes one expression; multi-column DISTINCT is not supported")
+	}
 	if _, err := p.expect(TokRParen, "')'"); err != nil {
 		return nil, err
 	}
-	return &AggregateExpr{Func: fn, Arg: arg}, nil
+	return &AggregateExpr{Func: fn, Distinct: distinct, Arg: arg}, nil
 }
 
 // parseFuncCallBody is called after a non-aggregate function name and its

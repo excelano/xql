@@ -476,6 +476,9 @@ func ValidateAggregate(a *parse.AggregateExpr, schema map[string]cell.ColumnInfo
 		}
 		return nil
 	}
+	if a.Distinct && a.Func != "COUNT" {
+		return fmt.Errorf("DISTINCT is supported only in COUNT; %s(DISTINCT ...) is not implemented", a.Func)
+	}
 	if err := ValidateExpr(a.Arg, schema); err != nil {
 		return err
 	}
@@ -508,6 +511,9 @@ type AggSlot struct {
 	sumIsInt   bool
 	minMaxCell cell.Cell
 	hasValue   bool
+	// seen is allocated only for COUNT(DISTINCT ...), so every other
+	// aggregate keeps costing one machine word of state per group.
+	seen map[string]struct{}
 }
 
 // NewAggSlot builds a slot for an aggregate node. ArgType is the static type
@@ -523,6 +529,9 @@ func NewAggSlot(a *parse.AggregateExpr, schema map[string]cell.ColumnInfo) (*Agg
 			return nil, err
 		}
 		s.ArgType = t
+	}
+	if a.Distinct {
+		s.seen = make(map[string]struct{})
 	}
 	return s, nil
 }
@@ -544,6 +553,14 @@ func (s *AggSlot) Advance(row cell.Row, ctx *EvalContext) error {
 	}
 	switch s.Agg.Func {
 	case "COUNT":
+		if s.seen != nil {
+			// FormatCell is the identity key. It is injective within a single
+			// type — ints render in full, floats with the precision that round
+			// trips exactly — and an argument expression has one static type
+			// for the whole scan, so two different values here cannot collide.
+			s.seen[cell.FormatCell(v.Cell, s.ArgType)] = struct{}{}
+			return nil
+		}
 		s.count++
 	case "SUM":
 		s.hasValue = true
@@ -591,6 +608,9 @@ func (s *AggSlot) Advance(row cell.Row, ctx *EvalContext) error {
 func (s *AggSlot) Finalize() EvalCell {
 	switch s.Agg.Func {
 	case "COUNT":
+		if s.seen != nil {
+			return EvalCell{Cell: cell.Cell{Int: int64(len(s.seen))}, Type: cell.TypeInt}
+		}
 		return EvalCell{Cell: cell.Cell{Int: s.count}, Type: cell.TypeInt}
 	case "SUM":
 		if !s.hasValue {

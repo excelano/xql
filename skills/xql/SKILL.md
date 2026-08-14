@@ -97,13 +97,13 @@ Grammar shared across every backend:
 
 Note the absence of `FROM`. The bound table is implicit — `xql csv data.csv` then `SELECT *` is enough.
 
-Projections may include arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `SUM`, `AVG`, `MIN`, `MAX`), and the scalar functions: `LOWER(s)`, `UPPER(s)`, `TRIM(s)` for string normalization, and `YEAR(d)`, `MONTH(d)`, `DAY(d)` for calendar components. Scalars can appear in the projection list, in predicates, and in `GROUP BY` (case-insensitive dedup uses this — see recipe 1). Unknown scalar names produce an "unknown function" error at plan time.
+Projections may include arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `COUNT(DISTINCT col)`, `SUM`, `AVG`, `MIN`, `MAX`), and the scalar functions: `LOWER(s)`, `UPPER(s)`, `TRIM(s)` for string normalization, and `YEAR(d)`, `MONTH(d)`, `DAY(d)` for calendar components. Scalars can appear in the projection list, in predicates, and in `GROUP BY` (case-insensitive dedup uses this — see recipe 1). Unknown scalar names produce an "unknown function" error at plan time.
 
 The date accessors take a `date` column or a `string` holding ISO dates; a string cell that isn't a date yields `NULL` for that row, while an `int`/`float` column is rejected before the scan with a pointer at the `--type` override. There is no serial-number reading of a numeric column.
 
 Predicates support `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] ILIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN a AND b`, and boolean composition with `AND`, `OR`, `NOT`. Left side is an expression (`WHERE price * qty > 100` is fine); right side is always a literal (`col1 = col2` is not supported).
 
-Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, `COUNT(DISTINCT col)`, and the scalar functions `LENGTH`/`SUBSTRING`/`LEFT`/`RIGHT`/`ROUND`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
+Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, multi-column `COUNT(DISTINCT a, b)`, and the scalar functions `LENGTH`/`SUBSTRING`/`LEFT`/`RIGHT`/`ROUND`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
 
 Case-insensitive on keywords AND column names on input; output preserves the canonical header case. Two columns that differ only in case (`ID` and `id`) surface as an ambiguous-column error rather than a guess.
 

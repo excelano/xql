@@ -960,3 +960,51 @@ func TestPreProcess(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCountDistinct(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(DISTINCT app)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := stmt.(*SelectStmt)
+	agg, ok := sel.Columns[0].Expr.(*AggregateExpr)
+	if !ok {
+		t.Fatalf("expected an aggregate, got %T", sel.Columns[0].Expr)
+	}
+	if agg.Func != "COUNT" || !agg.Distinct || agg.Star {
+		t.Errorf("got Func=%q Distinct=%v Star=%v", agg.Func, agg.Distinct, agg.Star)
+	}
+}
+
+func TestParsePlainCountIsNotDistinct(t *testing.T) {
+	stmt, err := Parse("SELECT COUNT(app)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agg := stmt.(*SelectStmt).Columns[0].Expr.(*AggregateExpr)
+	if agg.Distinct {
+		t.Error("COUNT(app) must not be marked distinct")
+	}
+}
+
+// SUM(DISTINCT x) is legal SQL and simply not implemented here, so the error
+// says that rather than reporting an unexpected keyword.
+func TestParseDistinctRejectedOutsideCount(t *testing.T) {
+	_, err := Parse("SELECT SUM(DISTINCT cost)")
+	if err == nil {
+		t.Fatal("SUM(DISTINCT ...) should be rejected")
+	}
+	if !strings.Contains(err.Error(), "only in COUNT") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestParseMultiColumnDistinctRejectedByName(t *testing.T) {
+	_, err := Parse("SELECT COUNT(DISTINCT a, b)")
+	if err == nil {
+		t.Fatal("multi-column DISTINCT should be rejected")
+	}
+	if !strings.Contains(err.Error(), "one expression") {
+		t.Errorf("the error should name the limitation rather than report a missing ')'; got %v", err)
+	}
+}

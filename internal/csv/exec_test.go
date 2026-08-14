@@ -1862,3 +1862,91 @@ func TestRemoveIndices(t *testing.T) {
 		t.Errorf("got %+v, want [2, 4]", got)
 	}
 }
+
+// distinctExec is a table built for these tests rather than the shared fixture,
+// whose columns are either all-unique or NULL-free — against it a distinct
+// count and a plain one agree, and a test that agrees either way proves
+// nothing. App has both a repeat and a NULL, so COUNT(App) and
+// COUNT(DISTINCT App) disagree on both counts.
+func distinctExec(t *testing.T) (*Executor, *bytes.Buffer) {
+	t.Helper()
+	cols := []string{"App", "Team"}
+	schema := map[string]cell.ColumnInfo{
+		"App":  {Name: "App", Type: cell.TypeString},
+		"Team": {Name: "Team", Type: cell.TypeString},
+	}
+	rows := []cell.Row{
+		{cell.Cell{Str: "Salesforce"}, cell.Cell{Str: "Finance"}},
+		{cell.Cell{Str: "Salesforce"}, cell.Cell{Str: "Sales"}},
+		{cell.Cell{Null: true}, cell.Cell{Str: "Ops"}},
+		{cell.Cell{Str: "Workday"}, cell.Cell{Str: "Finance"}},
+		// The repeat inside Finance is what makes the GROUP BY test mean
+		// something: without it every group's distinct count equals its plain
+		// one, and the test passes whether or not DISTINCT works.
+		{cell.Cell{Str: "Salesforce"}, cell.Cell{Str: "Finance"}},
+	}
+	tbl := &cell.Table{Path: "apps.csv", Columns: cols, Schema: schema, Rows: rows, Delim: ',', HasHeader: true}
+	buf := &bytes.Buffer{}
+	return &Executor{Table: tbl, Mode: "tsv", Headers: true, Out: buf}, buf
+}
+
+func runQuery(t *testing.T, e *Executor, q string) {
+	t.Helper()
+	stmt, err := parse.Parse(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Execute(stmt, false); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+}
+
+// Five rows, four non-NULL, two distinct: the three counts have to differ.
+func TestExecSelectCountDistinct(t *testing.T) {
+	e, out := distinctExec(t)
+	runQuery(t, e, "SELECT COUNT(*), COUNT(App), COUNT(DISTINCT App)")
+	if !strings.Contains(out.String(), "5\t4\t2") {
+		t.Errorf("expected 5, 4, 2; got: %q", out.String())
+	}
+}
+
+// The off-by-one the feature exists to remove. Piping SELECT DISTINCT into a
+// line count reads 3 here, because the NULL group is a line too.
+func TestExecCountDistinctIgnoresNull(t *testing.T) {
+	e, out := distinctExec(t)
+	runQuery(t, e, "SELECT COUNT(DISTINCT App)")
+	if !strings.Contains(out.String(), "COUNT(DISTINCT App)\n2") {
+		t.Errorf("NULL must not count as a distinct value; got: %q", out.String())
+	}
+}
+
+// Finance holds Salesforce twice and Workday once, so its distinct count and
+// its plain count differ — which is what a shared set across groups, or no set
+// at all, would get wrong.
+func TestExecCountDistinctGroupsIndependently(t *testing.T) {
+	e, out := distinctExec(t)
+	runQuery(t, e, "SELECT Team, COUNT(App), COUNT(DISTINCT App) GROUP BY Team ORDER BY Team")
+	got := out.String()
+	if !strings.Contains(got, "Finance\t3\t2") || !strings.Contains(got, "Sales\t1\t1") || !strings.Contains(got, "Ops\t0\t0") {
+		t.Errorf("per-group distinct sets are wrong; got: %q", got)
+	}
+}
+
+// COUNT never returns NULL, and the DISTINCT path has its own return that
+// could have forgotten it.
+func TestExecCountDistinctOverNoValuesIsZero(t *testing.T) {
+	e, out := distinctExec(t)
+	runQuery(t, e, "SELECT COUNT(DISTINCT App) WHERE App IS NULL")
+	if !strings.Contains(out.String(), "COUNT(DISTINCT App)\n0") {
+		t.Errorf("an empty distinct set is 0; got: %q", out.String())
+	}
+}
+
+// Two distinct counts in one query must not share a set.
+func TestExecTwoDistinctCountsKeepSeparateSets(t *testing.T) {
+	e, out := distinctExec(t)
+	runQuery(t, e, "SELECT COUNT(DISTINCT App), COUNT(DISTINCT Team)")
+	if !strings.Contains(out.String(), "2\t3") {
+		t.Errorf("expected 2 distinct apps and 3 distinct teams, got: %q", out.String())
+	}
+}

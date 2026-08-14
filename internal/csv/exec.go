@@ -1152,6 +1152,9 @@ func renderExprPrec(e parse.Expr, parentPrec int) string {
 		if n.Star {
 			return n.Func + "(*)"
 		}
+		if n.Distinct {
+			return n.Func + "(DISTINCT " + renderExpr(n.Arg) + ")"
+		}
 		return n.Func + "(" + renderExpr(n.Arg) + ")"
 	case *parse.FuncCallExpr:
 		parts := make([]string, len(n.Args))
