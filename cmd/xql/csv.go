@@ -23,10 +23,17 @@ import (
 // file really is unreadable.
 func warnIfNonUTF8(path string) {
 	s, err := encsniff.SniffFile(path)
-	if err != nil || s.Action != encsniff.Warn {
+	if err != nil || !s.IsWarning() {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "xql: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	// A signature match can name the encoding; a window that is merely not valid
+	// UTF-8 cannot, and saying so plainly beats calling the file usable and
+	// letting the CSV read fail with a message naming neither problem nor fix.
+	if s.Encoding != "" {
+		fmt.Fprintf(os.Stderr, "xql: warning: %s appears to be %s encoded.\n", path, s.Encoding)
+	} else {
+		fmt.Fprintf(os.Stderr, "xql: warning: %s is not valid UTF-8, and its encoding could not be identified.\n", path)
+	}
 	fmt.Fprintf(os.Stderr, "hint: %s\n", s.Hint)
 }
 
