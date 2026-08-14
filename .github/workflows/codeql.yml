@@ -1,8 +1,9 @@
 name: CodeQL
 
-# Runs GitHub's static analyzer against the Go source on every push and PR
-# against main, plus a weekly scheduled scan to catch new rules in CodeQL
-# itself even when the code hasn't changed.
+# The scan itself lives in excelano/.github, so every repo in the fleet runs the
+# same one and a correction reaches all of them at once. What stays here is when
+# to run and what to scan: that is this repo's business, the policy is the
+# fleet's. Same split as ci.yml.
 on:
   push:
     branches: [main]
@@ -11,33 +12,14 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
-permissions:
-  actions: read
-  contents: read
-  security-events: write
-
 jobs:
   analyze:
-    name: Analyze Go
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: stable
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: go
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:go"
+    # A called workflow cannot be granted more than its caller holds, so the
+    # upload permission has to be here rather than only in the called file.
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: excelano/.github/.github/workflows/codeql.yml@main
+    with:
+      language: go
