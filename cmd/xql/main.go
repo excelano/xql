@@ -69,6 +69,10 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 		return xql.InstallSkill(resolveVersion())
 	case "--uninstall-skill":
 		return xql.UninstallSkill()
+	// The bare state command binds no list and reads the token cache only,
+	// so it too is answered before any backend is chosen.
+	case "auth":
+		return runAuth(args[1:])
 	}
 
 	// Find the first non-flag token to route on, so `xql --describe data.csv`
@@ -205,6 +209,9 @@ func printUsage(w io.Writer, reg []Backend) {
 	fmt.Fprintln(w, "  xql csv     --help")
 	fmt.Fprintln(w, "  xql sp      --help")
 	fmt.Fprintln(w, "  xql xinglet --help")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Session:")
+	fmt.Fprintln(w, "  xql auth [--json]    report the SharePoint sign-in state shared with the xfiles tools")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Claude Code:")
 	fmt.Fprintln(w, "  --install-skill      install the xql skill into ~/.claude/skills/xql")

@@ -42,6 +42,7 @@ func runSPImpl(args []string) int {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
 		fmt.Fprintln(w, spauth.CachePath()+", one session shared with the xfiles tools.")
+		fmt.Fprintln(w, "`xql auth` reports that session without starting a sign-in.")
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, exitCodesBlock)
 	}
@@ -73,11 +74,7 @@ func runSPImpl(args []string) int {
 	}
 
 	ctx := context.Background()
-	// The cache xql kept before the family shared one; adopted on first run so
-	// nobody signs in again.
-	legacyTokenCache := filepath.Join(configDir(), "sp-token.json")
-
-	client, err := spauth.NewPublicClient(spauth.CachePath(), legacyTokenCache)
+	client, err := spauth.NewPublicClient(spauth.CachePath(), legacyTokenCache())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xql: setup: %v\n", err)
 		return 1
@@ -180,4 +177,16 @@ func runSPImpl(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// legacyTokenCache is the cache xql kept before the family shared one; adopted
+// on first run so nobody signs in again.
+func legacyTokenCache() string {
+	return filepath.Join(configDir(), "sp-token.json")
+}
+
+// runAuth is the bare `xql auth` command: the state of the SharePoint session
+// this backend shares with the xfiles tools, reported without a sign-in.
+func runAuth(args []string) int {
+	return spauth.AuthCommand(context.Background(), "xql", legacyTokenCache(), args, os.Stdout, os.Stderr)
 }

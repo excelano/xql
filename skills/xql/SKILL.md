@@ -49,7 +49,7 @@ The recipes and flags below assume an xql with the scalar functions `LOWER`/`UPP
 
 The top-level dispatcher scans past any leading flags to find the first non-flag token, then routes on it:
 
-1. If the token is a registered subcommand (`csv`, `sp`, `xinglet`, or `help`/`--help`/`-h`/`-V`/`--version`), that backend runs with the remaining args (leading flags preserved).
+1. If the token is a registered subcommand (`csv`, `sp`, `xinglet`, or `help`/`--help`/`-h`/`-V`/`--version`), that backend runs with the remaining args (leading flags preserved). `xql auth` is answered the same way, before any backend is bound.
 2. Otherwise, if the token has a recognized file extension (`.csv` or `.tsv`), the CSV backend runs with the full args.
 3. Otherwise, error.
 
@@ -188,6 +188,8 @@ Writes validate against the list's schema before any Graph round-trip. Person, L
 
 Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/excelano/sp-token.json` (mode 0600), one file shared with the xfiles tools, so a sign-in done with any of them covers `xql sp` too.
 
+**Pre-flight:** `xql auth --json` reports that shared session — `signed_in`, `account`, `tenant`, `token_expires`, `scopes` — and exits 0 either way, without starting a sign-in. Run it before a batch of `xql sp` calls when you cannot be sure the machine has been signed in, and branch on `signed_in` rather than on a failed query. `signed_in: false` means ask the user to run `xql sp <list-url>` (or any xfiles tool) once from their own terminal.
+
 ## Recipes
 
 ### 1. Case-insensitive dedup profile of a CSV
@@ -266,7 +268,7 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Big \
 - `... is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly` — you tried `WHERE LOWER(col) = 'x'` against `sp`. Use `WHERE col ILIKE 'x'` instead.
 - `LIKE pattern has no OData equivalent` — mid-pattern `%` or `_` against `sp`. Rewrite as `startswith`/`endswith`/`contains`-shaped, or fetch the column and filter client-side.
 - `--exec write requires --commit` — a write in one-shot mode without the flag. Preview shipped; add `--commit` to apply.
-- `no cached token, and no terminal is attached to complete device-code sign-in` — you are the first caller on this machine and sign-in needs a human. It fails immediately rather than printing a code and blocking, which is the right outcome for you but means you cannot fix it yourself: ask the user to run `xql sp <list-url>` once from their own terminal to cache a token, then re-run. Do not retry, and do not try to script the browser flow.
+- `no cached token, and no terminal is attached to complete device-code sign-in` — you are the first caller on this machine and sign-in needs a human. It fails immediately rather than printing a code and blocking, which is the right outcome for you but means you cannot fix it yourself: ask the user to run `xql sp <list-url>` once from their own terminal to cache a token, then re-run. Do not retry, and do not try to script the browser flow. `xql auth` would have told you this before the attempt.
 
 ## Not this skill's job
 
