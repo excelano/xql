@@ -3,8 +3,8 @@ module github.com/excelano/xql
 go 1.25.0
 
 require (
-	github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0
-	github.com/mattn/go-runewidth v0.0.27
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.9.0
+	github.com/mattn/go-runewidth v0.0.28
 	github.com/peterh/liner v1.2.2
 )
 
