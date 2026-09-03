@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/excelano/spauth"
 	"github.com/excelano/xql/internal/parse"
 	"github.com/excelano/xql/internal/repl"
 	"github.com/excelano/xql/internal/sp"
@@ -73,19 +75,26 @@ func runSPImpl(args []string) int {
 	ctx := context.Background()
 	tokenCachePath := filepath.Join(configDir(), "sp-token.json")
 
-	client, err := sp.NewPublicClient(tokenCachePath)
+	client, err := spauth.NewPublicClient(tokenCachePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xql: setup: %v\n", err)
 		return 1
 	}
 
-	result, err := sp.Authenticate(ctx, client)
+	result, err := spauth.Authenticate(ctx, client)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "xql: authentication failed: %v%s\n", err, sp.HintForAuthError(err))
+		fmt.Fprintf(os.Stderr, "xql: authentication failed: %v%s\n", err, spauth.HintForAuthError(err))
 		return 1
 	}
 
-	graph := sp.NewGraphClient(client, result.Account)
+	// The Prefer header is required for ad-hoc $filter / $orderby on
+	// SharePoint list-item fields; without it any fields/<col> filter returns
+	// 400 invalidRequest. The timeout is per request, and a list page is a
+	// small JSON document.
+	graph := spauth.NewGraphClient(client, result.Account,
+		spauth.WithTimeout(60*time.Second),
+		spauth.WithHeader("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly"),
+	)
 
 	bound, err := sp.ResolveListBinding(ctx, graph, listURL)
 	if err != nil {

@@ -1,3 +1,7 @@
+// Package sp is the SharePoint backend for xql: list binding (site + list
+// resolution + column schema), OData translation, and the read/write executor.
+// Sign-in and the Graph HTTP client come from github.com/excelano/spauth, the
+// layer this backend shares with the xfiles tools.
 package sp
 
 import (
@@ -6,6 +10,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/excelano/spauth"
 )
 
 // FieldType is a coarse classification of a SharePoint column, derived from
@@ -103,7 +109,7 @@ func parseListURL(rawURL string) (hostname, sitePath, listName string, err error
 
 // ResolveListBinding resolves a SharePoint list URL to its Graph IDs and
 // column schema in three calls: site, list, columns.
-func ResolveListBinding(ctx context.Context, graph *GraphClient, listURL string) (*BoundList, error) {
+func ResolveListBinding(ctx context.Context, graph *spauth.GraphClient, listURL string) (*BoundList, error) {
 	hostname, sitePath, listName, err := parseListURL(listURL)
 	if err != nil {
 		return nil, err
@@ -135,14 +141,14 @@ func ResolveListBinding(ctx context.Context, graph *GraphClient, listURL string)
 	}, nil
 }
 
-func resolveSiteID(ctx context.Context, graph *GraphClient, hostname, sitePath string) (string, error) {
+func resolveSiteID(ctx context.Context, graph *spauth.GraphClient, hostname, sitePath string) (string, error) {
 	var path string
 	if sitePath == "" {
 		path = fmt.Sprintf("/sites/%s", hostname)
 	} else {
 		path = fmt.Sprintf("/sites/%s:%s", hostname, sitePath)
 	}
-	body, err := graph.get(ctx, path, nil)
+	body, err := graph.Get(ctx, path, nil)
 	if err != nil {
 		return "", err
 	}
@@ -163,11 +169,11 @@ func resolveSiteID(ctx context.Context, graph *GraphClient, hostname, sitePath s
 // expressions (and is finicky about even single-property ones), so we fetch
 // the full list collection and match client-side. Sites rarely host more than
 // a few dozen lists; pagination via getAll handles the long-tail case.
-func resolveListID(ctx context.Context, graph *GraphClient, siteID, listName string) (id, name, displayName string, err error) {
+func resolveListID(ctx context.Context, graph *spauth.GraphClient, siteID, listName string) (id, name, displayName string, err error) {
 	q := url.Values{
 		"$select": {"id,name,displayName"},
 	}
-	raws, err := graph.getAll(ctx, fmt.Sprintf("/sites/%s/lists", siteID), q)
+	raws, err := graph.GetAll(ctx, fmt.Sprintf("/sites/%s/lists", siteID), q)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -203,8 +209,8 @@ func resolveListID(ctx context.Context, graph *GraphClient, siteID, listName str
 	return m.ID, m.Name, m.DisplayName, nil
 }
 
-func fetchColumns(ctx context.Context, graph *GraphClient, siteID, listID string) ([]string, map[string]FieldInfo, error) {
-	raws, err := graph.getAll(ctx, fmt.Sprintf("/sites/%s/lists/%s/columns", siteID, listID), nil)
+func fetchColumns(ctx context.Context, graph *spauth.GraphClient, siteID, listID string) ([]string, map[string]FieldInfo, error) {
+	raws, err := graph.GetAll(ctx, fmt.Sprintf("/sites/%s/lists/%s/columns", siteID, listID), nil)
 	if err != nil {
 		return nil, nil, err
 	}

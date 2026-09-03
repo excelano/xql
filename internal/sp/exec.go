@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/excelano/spauth"
 	"github.com/excelano/xql/internal/cell"
 	"github.com/excelano/xql/internal/eval"
 	"github.com/excelano/xql/internal/parse"
@@ -27,7 +28,7 @@ import (
 // trailing '!'). --exec mode leaves Confirm nil so writes either dry-run or
 // commit explicitly based on --commit.
 type Executor struct {
-	Graph              *GraphClient
+	Graph              *spauth.GraphClient
 	Bound              *BoundList
 	Mode               string
 	Headers            bool
@@ -150,7 +151,7 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 	}
 
 	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
-	raws, err := e.Graph.getAll(ctx, path, q)
+	raws, err := e.Graph.GetAll(ctx, path, q)
 	if err != nil {
 		return err
 	}
@@ -1076,7 +1077,7 @@ func (e *Executor) executeUpdate(ctx context.Context, upd *parse.UpdateStmt, com
 			continue
 		}
 		path := fmt.Sprintf("/sites/%s/lists/%s/items/%s/fields", e.Bound.SiteID, e.Bound.ListID, it.ID)
-		if _, err := e.Graph.patch(ctx, path, body); err != nil {
+		if _, err := e.Graph.Patch(ctx, path, body); err != nil {
 			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, err)
 			continue
 		}
@@ -1133,7 +1134,7 @@ func (e *Executor) executeDelete(ctx context.Context, del *parse.DeleteStmt, com
 	succ := 0
 	for _, it := range items {
 		path := fmt.Sprintf("/sites/%s/lists/%s/items/%s", e.Bound.SiteID, e.Bound.ListID, it.ID)
-		if err := e.Graph.delete(ctx, path); err != nil {
+		if err := e.Graph.Delete(ctx, path); err != nil {
 			fmt.Fprintf(e.Out, "  id=%s: %v\n", it.ID, err)
 			continue
 		}
@@ -1188,7 +1189,7 @@ func (e *Executor) executeInsert(ctx context.Context, ins *parse.InsertStmt, com
 	}
 
 	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
-	resp, err := e.Graph.post(ctx, path, map[string]any{"fields": body})
+	resp, err := e.Graph.Post(ctx, path, map[string]any{"fields": body})
 	if err != nil {
 		return err
 	}
@@ -1245,7 +1246,7 @@ func (e *Executor) fetchTargets(ctx context.Context, where parse.Predicate) ([]l
 		q.Set("$filter", filter)
 	}
 	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
-	raws, err := e.Graph.getAll(ctx, path, q)
+	raws, err := e.Graph.GetAll(ctx, path, q)
 	if err != nil {
 		return nil, err
 	}
