@@ -39,7 +39,7 @@ Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window 
 
 Same file, different verb. On a **local delimited file**, xql is the last step, not the first: [xray](https://github.com/excelano/xray) profiles it read-only and names the hazards, [xled](https://github.com/excelano/xled) repairs cell values (currency trapped as text, stripped leading zeros, a buried header), and [xshape](https://github.com/excelano/xshape) fixes the geometry (unpivot a wide export before you can group by year). Querying a file none of those have seen is how a leading zero becomes an integer.
 
-On **SharePoint**, the neighbour is a different family: xql owns *list rows and columns*, and the [xfiles](https://github.com/excelano/xfiles) tools own *files and folders* in a document library — `xcp` (copy, like scp), `xftp` (an interactive session), `xsync` (mirror a tree, like rsync), `xfind` (walk for matching paths), `xtree` (print the tree). If the task is "upload this folder to the library" or "pull down everything under /Shared Documents/Reports", that is xfiles, not xql. They share the same tenant authentication.
+On **SharePoint**, the neighbour is a different family: xql owns *list rows and columns*, and the [xfiles](https://github.com/excelano/xfiles) tools own *files and folders* in a document library — `xcp` (copy, like scp), `xftp` (an interactive session), `xsync` (mirror a tree, like rsync), `xfind` (walk for matching paths), `xtree` (print the tree). If the task is "upload this folder to the library" or "pull down everything under /Shared Documents/Reports", that is xfiles, not xql. They share one sign-in: the same app registration and the same token cache.
 
 ## Feature guard
 
@@ -186,7 +186,7 @@ Column identity is dual: every column has both an **internal name** (what Graph 
 
 Writes validate against the list's schema before any Graph round-trip. Person, Lookup, Hyperlink, and Calculated columns are all rejected on write with a clear message. Lookup fields on read return the numeric ID; write with that numeric ID, not the display text.
 
-Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/xql/sp-token.json` (mode 0600) for subsequent runs.
+Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/excelano/sp-token.json` (mode 0600), one file shared with the xfiles tools, so a sign-in done with any of them covers `xql sp` too.
 
 ## Recipes
 

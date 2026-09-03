@@ -24,7 +24,7 @@ IT administrators evaluating the SharePoint backend for a Microsoft 365 tenant w
 
 ## What xql stores
 
-xql stores REPL command history at `~/.config/xql/history-csv` and `~/.config/xql/history-sp` with file mode 0600 (directory mode 0700). The SharePoint backend additionally caches a refresh token at `~/.config/xql/sp-token.json` (mode 0600) so subsequent runs reauthenticate without another device-code prompt. Delete that file to force re-authentication; revoke the granted permission at https://myaccount.microsoft.com/applications to invalidate the token server-side. There is no telemetry, no analytics, and no remote logging.
+xql stores REPL command history at `~/.config/xql/history-csv` and `~/.config/xql/history-sp` with file mode 0600 (directory mode 0700). The SharePoint backend additionally caches a refresh token at `~/.config/excelano/sp-token.json` (mode 0600), a file shared with the xfiles tools because they sign in against the same app registration, so subsequent runs of any tool in the family reauthenticate without another device-code prompt. The cache is written through a temp file and rename so an interrupted write never replaces a good cache. Versions before the cache was shared kept the token at `~/.config/xql/sp-token.json`; the new version adopts that file on first run and leaves it in place, and the uninstaller's purge step removes it. Delete the shared file to force re-authentication for the whole family; revoke the granted permission at https://myaccount.microsoft.com/applications to invalidate the token server-side. There is no telemetry, no analytics, and no remote logging.
 
 ## Verifying releases
 

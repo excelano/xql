@@ -210,7 +210,7 @@ A few inference behaviors are worth knowing:
 xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks
 ```
 
-The SharePoint backend binds to a single list and runs the same SQL grammar against it via Microsoft Graph. Authentication is device-code OAuth: the first run prints a short code and a URL to enter it at, and a refresh token is cached at `~/.config/xql/sp-token.json` (file mode 0600) so subsequent runs reauthenticate silently. The cached token is per-account; it carries `Sites.ReadWrite.All` delegated permission.
+The SharePoint backend binds to a single list and runs the same SQL grammar against it via Microsoft Graph. Authentication is device-code OAuth: the first run prints a short code and a URL to enter it at, and a refresh token is cached at `~/.config/excelano/sp-token.json` (file mode 0600) so subsequent runs reauthenticate silently. That cache is shared with the [xfiles](https://github.com/excelano/xfiles) tools, which sign in against the same app registration, so one sign-in covers `xql sp`, `xftp`, `xcp`, `xsync`, `xfind`, and `xtree`; a cache left by an earlier version at `~/.config/xql/sp-token.json` is adopted on first run. The cached token is per-account; it carries `Sites.ReadWrite.All` delegated permission. The sign-in layer itself lives in the [spauth](https://github.com/excelano/spauth) module, which both repositories import.
 
 `WHERE` predicates translate to OData `$filter` and run server-side, so even large lists return quickly. `ORDER BY`, `LIMIT`, `OFFSET`, and `DISTINCT` apply client-side after the filtered fetch. `LIKE` and `ILIKE` patterns translate to OData `startswith`, `endswith`, and `contains`; the underscore wildcard and mid-pattern `%` aren't expressible in OData and are rejected with a clear error rather than silently working incorrectly. `IN` expands to an `or` chain, and `BETWEEN` to a `ge`/`le` pair.
 
@@ -282,7 +282,7 @@ The skill lets any Claude Code session use `xql` correctly without hallucinating
 
 ## Security
 
-`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/xql/sp-token.json` (mode 0600). `xql xinglet` calls the xinglist export endpoint over HTTPS with `Authorization: Bearer $XINGLET_TOKEN`; the token is never persisted by `xql` (it lives only in your shell environment for the lifetime of the process). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
+`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/excelano/sp-token.json` (mode 0600), a file shared with the xfiles tools. `xql xinglet` calls the xinglist export endpoint over HTTPS with `Authorization: Bearer $XINGLET_TOKEN`; the token is never persisted by `xql` (it lives only in your shell environment for the lifetime of the process). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
 
 ## License
 

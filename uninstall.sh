@@ -1,6 +1,8 @@
 #!/bin/sh
 # xql uninstaller — finds and removes the xql binary, with an optional
-# follow-up step to remove the REPL history at ~/.config/xql/. POSIX sh,
+# follow-up step to remove ~/.config/xql/ (REPL history, and the token cache
+# versions before the shared cache left behind). The shared token cache at
+# ~/.config/excelano is never touched: the xfiles tools use it too. POSIX sh,
 # no bash extensions.
 #
 # Usage:

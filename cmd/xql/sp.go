@@ -41,7 +41,7 @@ func runSPImpl(args []string) int {
 		printFlags(w, fs)
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
-		fmt.Fprintln(w, "~/.config/xql/sp-token.json.")
+		fmt.Fprintln(w, spauth.CachePath()+", one session shared with the xfiles tools.")
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, exitCodesBlock)
 	}
@@ -73,9 +73,11 @@ func runSPImpl(args []string) int {
 	}
 
 	ctx := context.Background()
-	tokenCachePath := filepath.Join(configDir(), "sp-token.json")
+	// The cache xql kept before the family shared one; adopted on first run so
+	// nobody signs in again.
+	legacyTokenCache := filepath.Join(configDir(), "sp-token.json")
 
-	client, err := spauth.NewPublicClient(tokenCachePath)
+	client, err := spauth.NewPublicClient(spauth.CachePath(), legacyTokenCache)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xql: setup: %v\n", err)
 		return 1
