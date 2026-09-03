@@ -4,6 +4,8 @@ github.com/clipperhouse/uax29/v2 v2.2.0 h1:ChwIKnQN3kcZteTXMgb1wztSgaU+ZemkgWdoh
 github.com/clipperhouse/uax29/v2 v2.2.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
 github.com/excelano/encsniff-go v0.2.0 h1:sOOKzfcQthemxNL/nlqpiyGg8XldhfSPylPyThSrJYA=
 github.com/excelano/encsniff-go v0.2.0/go.mod h1:5k9ijQKmg4Lp1hqmihMpMFNuTa/6yeR7VXqkIlAnx9k=
+github.com/excelano/spauth v0.1.0 h1:DVpOak0sQVJYWtNcVfcewoXGTEgumBN1SNwL0L2HGvQ=
+github.com/excelano/spauth v0.1.0/go.mod h1:oqE8Z1xn4wNJnyv54h36LBHzHYYr2K8aMP+nzixST5I=
 github.com/golang-jwt/jwt/v5 v5.2.2 h1:Rl4B7itRWVtYIHFrSNd7vhTiz9UpLdi6gZhZ3wEeDy8=
 github.com/golang-jwt/jwt/v5 v5.2.2/go.mod h1:pqrtFR0X4osieyHYxtmOUWsAWrfe1Q5UVIyoH402zdk=
 github.com/google/uuid v1.3.0 h1:t6JiXgmwXMjEs8VusXIJk2BXHsn+wx8BZdTaoZ5fu7I=
