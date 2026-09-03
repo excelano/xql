@@ -28,5 +28,19 @@ pinned installs on the next release.
 **The release workflow takes a `workflow_dispatch` input,** so a tag that fails
 to trigger it needs no re-tagging: `gh workflow run release.yml -f tag=v1.2.3`.
 
+**The unit tests cannot reach SharePoint,** so a clean `go test ./...` says the
+code compiles and the pure logic holds, not that the `sp` backend's Graph calls
+still work. The live suite is the pass that does, and it is part of step 1 here:
+
+```sh
+XQL_LIVE_LIST=https://<tenant>.sharepoint.com/sites/<test-site>/Lists/<test-list> go test -tags live ./...
+```
+
+It runs on a machine that has signed in once (`xql sp`, or any xfiles tool),
+binds the named list, and round-trips one row through INSERT, SELECT, UPDATE
+and DELETE, so the list's rows are what they were when it finishes. It cannot
+run in CI: device-code needs a human, and a refresh token in this public repo's
+secrets would be a live credential to the tenant.
+
 **The `xtabular` metapackage depends on xql** and pins no version, so a release
 needs no metapackage rebuild. Only a change in membership does.
