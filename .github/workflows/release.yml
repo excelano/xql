@@ -43,3 +43,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # Every architecture above is built on one amd64 runner, so nothing arm64
+  # has run at this point — the packages are cross-compiled and shipped
+  # unexecuted. This installs them on arm64 hardware and runs what they
+  # installed, before anybody reaches them through apt.
+  smoke:
+    needs: goreleaser
+    uses: excelano/.github/.github/workflows/deb-smoke.yml@main
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
