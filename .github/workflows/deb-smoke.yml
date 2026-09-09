@@ -1,0 +1,29 @@
+name: deb-smoke
+
+# Install a shipped release's arm64 packages and run what they installed.
+#
+# release.yml runs this on every release. This file exists so it can also be
+# pointed at a release that already shipped — the packages people already have
+# — without cutting a new one:
+#
+#     gh workflow run deb-smoke.yml -f tag=v1.2.3
+#
+# It writes nothing: it downloads, installs on a runner that is then thrown
+# away, and reports. What to run comes from release.conf.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release whose packages to install (e.g. v1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    uses: excelano/.github/.github/workflows/deb-smoke.yml@main
+    with:
+      tag: ${{ inputs.tag }}
