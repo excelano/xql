@@ -9,8 +9,8 @@ This file carries what is true of xql and not of its siblings.
 |---|---|
 | Loop | goreleaser |
 | `apt-ship` argument | `xql` |
-| winget package | `Excelano.xql` |
-| Windows asset | `xql_<version>_windows_amd64.zip` |
+| Packages per release | 2, amd64 arm64 |
+| winget package | `Excelano.xql` — `xql_<version>_windows_amd64.zip` |
 
 **The release builds** platform archives for Linux and macOS on both
 architectures plus Windows x64, the two `.deb` packages, `checksums.txt`, the
