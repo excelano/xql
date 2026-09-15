@@ -86,30 +86,6 @@ xql --install-skill
 
 Or download the `windows_amd64` zip from the [releases page](https://github.com/excelano/xql/releases) and unzip it.
 
-### Prebuilt binary (Linux and macOS, x86_64 and arm64)
-
-```
-curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
-```
-
-If the installer needs to write to a root-owned directory like `/usr/local/bin` (typical when upgrading a previously sudo-installed copy), wrap `sh`, not `curl`:
-
-```
-curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sudo sh
-```
-
-Pin to a specific version:
-
-```
-XQL_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
-```
-
-Install elsewhere than `/usr/local/bin` (or `~/.local/bin` if not writable):
-
-```
-XQL_INSTALL_DIR=$HOME/bin curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/install.sh | sh
-```
-
 ### Go
 
 From source (Go 1.24 or later):
@@ -123,12 +99,6 @@ go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
 Re-run the installer. If `xql` is already on your `PATH`, it upgrades the existing copy in place rather than scattering a duplicate into the default directory. If you explicitly set `XQL_INSTALL_DIR` to a different directory than the existing copy, the installer warns and leaves both in place — `PATH` order then decides which version runs.
 
 ### Uninstall
-
-```
-curl -fsSL https://raw.githubusercontent.com/excelano/xql/main/uninstall.sh | sh
-```
-
-The uninstaller removes the `xql` binary it finds on `PATH` and asks before removing `~/.config/xql/` (REPL history). Run twice if you have duplicate installs in multiple directories. `XQL_UNINSTALL_YES=1` skips the binary-removal prompt but keeps the config dir — the REPL history is only removed if you also pass `XQL_PURGE=1` (or answer yes interactively).
 
 ## Backends
 
@@ -276,7 +246,7 @@ xql --install-skill
 
 That writes `~/.claude/skills/xql/` and stamps in the version it came from, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `xql --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
-The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, the curl one-liner, or a build from source.
+The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, or a build from source.
 
 The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, splits the SharePoint and local-CSV lanes so the "reach for DuckDB" caveat lands only where DuckDB is actually an option, and points at xfiles for library *files* rather than list rows.
 

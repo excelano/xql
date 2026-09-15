@@ -73,11 +73,6 @@ checksum:
 release:
   draft: false
   prerelease: auto
-  # Ship install.sh alongside the platform tarballs so users can pin to a
-  # specific release URL instead of relying on the rolling main branch.
-  extra_files:
-    - glob: install.sh
-    - glob: uninstall.sh
 
 changelog:
   sort: asc
