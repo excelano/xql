@@ -18,7 +18,7 @@ The SharePoint backend authenticates through a multi-tenant Microsoft Entra appl
 | Requested permission | Microsoft Graph `Sites.ReadWrite.All` |
 | Permission type | Delegated |
 
-Excelano LLC is a Microsoft-verified publisher, so the consent screen and the enterprise application record both show the publisher name with a verified badge rather than the unverified-publisher warning. The same registration backs xql's sibling tool, [xftp](https://github.com/excelano/xftp), so a single consent decision covers both. Granting or blocking one grants or blocks the other.
+Excelano LLC is a Microsoft-verified publisher, so the consent screen and the enterprise application record both show the publisher name with a verified badge rather than the unverified-publisher warning. The same registration backs the sibling [xfiles](https://github.com/excelano/xfiles) tools, so a single consent decision covers xql and every xfiles command. Granting or blocking one grants or blocks them all.
 
 ## What the delegated permission means
 
@@ -57,7 +57,7 @@ If you want xql available to some people but not the whole tenant, open the ente
 
 ## Reviewing and revoking
 
-After consent the application appears permanently under Enterprise applications, where its sign-in logs show exactly who has used it and when. To revoke access for the whole tenant, delete the enterprise application (this removes the consent and the service principal), or set "Enabled for users to sign in" to No under Properties to block it without deleting the record. Either action takes effect for both xql and xftp. An individual user can revoke their own grant at any time at <https://myaccount.microsoft.com/applications>.
+After consent the application appears permanently under Enterprise applications, where its sign-in logs show exactly who has used it and when. To revoke access for the whole tenant, delete the enterprise application (this removes the consent and the service principal), or set "Enabled for users to sign in" to No under Properties to block it without deleting the record. Either action takes effect for xql and the xfiles tools alike. An individual user can revoke their own grant at any time at <https://myaccount.microsoft.com/applications>.
 
 ## Reporting a concern
 
