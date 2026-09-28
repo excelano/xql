@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/excelano/encsniff-go v0.2.0
 	github.com/excelano/spauth v0.1.2
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect

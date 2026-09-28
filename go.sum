@@ -1,7 +1,7 @@
 github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0 h1:Byx2mFH6zOunKuxJlzKj/L31czf2B45rsjToG4yo8uI=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0/go.mod h1:OZ+YRWCg7N54lg8lzu1OiGRGbWsqPh+FEGHA7bvbLKA=
-github.com/clipperhouse/uax29/v2 v2.2.0 h1:ChwIKnQN3kcZteTXMgb1wztSgaU+ZemkgWdohwgs8tY=
-github.com/clipperhouse/uax29/v2 v2.2.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
+github.com/clipperhouse/uax29/v2 v2.7.0 h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=
+github.com/clipperhouse/uax29/v2 v2.7.0/go.mod h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=
 github.com/excelano/atrest v0.1.0 h1:hbhfwgsMbegg4o8pZ0uNZ7cvp8edjw6wvQZrNwnHxCo=
 github.com/excelano/atrest v0.1.0/go.mod h1:76NjGMtRzeiJHum25klkVyg2c/eVN0JN08JXre3gwKA=
 github.com/excelano/encsniff-go v0.2.0 h1:sOOKzfcQthemxNL/nlqpiyGg8XldhfSPylPyThSrJYA=
