@@ -186,7 +186,7 @@ Column identity is dual: every column has both an **internal name** (what Graph 
 
 Writes validate against the list's schema before any Graph round-trip. Person, Lookup, Hyperlink, and Calculated columns are all rejected on write with a clear message. Lookup fields on read return the numeric ID; write with that numeric ID, not the display text.
 
-Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/excelano/sp-token.json` (mode 0600), one file shared with the xfiles tools, so a sign-in done with any of them covers `xql sp` too.
+Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/excelano/sp-token.json`, one file shared with the xfiles tools, so a sign-in done with any of them covers `xql sp` too.
 
 **Pre-flight:** `xql auth --json` reports that shared session — `signed_in`, `account`, `tenant`, `token_expires`, `scopes` — and exits 0 either way, without starting a sign-in. Run it before a batch of `xql sp` calls when you cannot be sure the machine has been signed in, and branch on `signed_in` rather than on a failed query. `signed_in: false` means ask the user to run `xql sp <list-url>` (or any xfiles tool) once from their own terminal.
 
