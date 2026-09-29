@@ -26,3 +26,4 @@ go.work.sum
 
 # goreleaser output
 /dist/
+ship.toml
