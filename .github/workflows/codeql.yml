@@ -5,10 +5,7 @@ name: CodeQL
 # to run and what to scan: that is this repo's business, the policy is the
 # fleet's. Same split as ci.yml.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
   schedule:
     - cron: "0 6 * * 1"
 
