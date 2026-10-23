@@ -82,12 +82,12 @@ func serverFilter(p parse.Predicate, schema map[string]FieldInfo) parse.Predicat
 }
 
 // filterable reports whether a column can narrow the fetch. Graph cannot
-// filter on the item ID, a multi-value column reads as text the evaluator
-// matches differently, and an unknown name is left for the evaluator to
-// report.
+// filter on the item ID, a calculated column holds text whatever its formula
+// produces, a multi-value column reads as text the evaluator matches
+// differently, and an unknown name is left for the evaluator to report.
 func filterable(col string, schema map[string]FieldInfo) bool {
 	f, ok := schema[col]
-	return ok && col != "ID" && !f.Multi
+	return ok && col != "ID" && f.Type != FieldCalculated && !f.Multi
 }
 
 func isTextField(f FieldInfo) bool {
@@ -214,10 +214,11 @@ func formatValue(v parse.Value, field FieldInfo) (string, error) {
 	case parse.ValNumber:
 		return v.Num, nil
 	case parse.ValBool:
+		// SharePoint answers `eq true` with the false rows; 1 and 0 work.
 		if v.Bool {
-			return "true", nil
+			return "1", nil
 		}
-		return "false", nil
+		return "0", nil
 	case parse.ValNull:
 		return "", fmt.Errorf("internal: NULL in comparison (parser should reject)")
 	}

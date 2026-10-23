@@ -40,7 +40,8 @@ const (
 
 // FieldInfo describes one column. Name is the internal name used in Graph
 // $filter expressions and PATCH bodies; DisplayName is what the SharePoint UI
-// shows.
+// shows. Choices lists a choice column's options when it accepts no others.
+// Output is the type a calculated column's formula produces.
 type FieldInfo struct {
 	Name        string
 	DisplayName string
@@ -49,6 +50,8 @@ type FieldInfo struct {
 	ReadOnly    bool
 	Required    bool
 	Multi       bool
+	Choices     []string
+	Output      FieldType
 }
 
 // BoundList is the resolved single list this REPL session operates on.
@@ -238,6 +241,8 @@ func fetchColumns(ctx context.Context, graph *graphauth.GraphClient, siteID, lis
 			ReadOnly:    c.ReadOnly,
 			Required:    c.Required,
 			Multi:       allowsMultipleValues(&c),
+			Choices:     closedChoices(&c),
+			Output:      calculatedOutput(&c),
 		}
 	}
 	return order, schema, nil
@@ -255,31 +260,62 @@ type columnJSON struct {
 	Text *struct {
 		AllowMultipleLines bool `json:"allowMultipleLines"`
 	} `json:"text,omitempty"`
-	Number             *json.RawMessage `json:"number,omitempty"`
-	Boolean            *json.RawMessage `json:"boolean,omitempty"`
-	DateTime           *json.RawMessage `json:"dateTime,omitempty"`
-	Choice             *json.RawMessage `json:"choice,omitempty"`
+	Number   *json.RawMessage `json:"number,omitempty"`
+	Boolean  *json.RawMessage `json:"boolean,omitempty"`
+	DateTime *json.RawMessage `json:"dateTime,omitempty"`
+	Choice   *struct {
+		AllowTextEntry bool     `json:"allowTextEntry"`
+		Choices        []string `json:"choices"`
+	} `json:"choice,omitempty"`
 	PersonOrGroup      *json.RawMessage `json:"personOrGroup,omitempty"`
 	Lookup             *json.RawMessage `json:"lookup,omitempty"`
 	HyperlinkOrPicture *json.RawMessage `json:"hyperlinkOrPicture,omitempty"`
-	Calculated         *json.RawMessage `json:"calculated,omitempty"`
+	Calculated         *struct {
+		OutputType string `json:"outputType"`
+	} `json:"calculated,omitempty"`
 }
 
 // allowsMultipleValues reports whether a person or lookup column holds a
-// list of values rather than one.
+// list of values rather than one. Graph names the flag differently on the
+// two facets.
 func allowsMultipleValues(c *columnJSON) bool {
 	for _, facet := range []*json.RawMessage{c.PersonOrGroup, c.Lookup} {
 		if facet == nil {
 			continue
 		}
 		var f struct {
-			AllowMultipleValues bool `json:"allowMultipleValues"`
+			AllowMultipleValues    bool `json:"allowMultipleValues"`
+			AllowMultipleSelection bool `json:"allowMultipleSelection"`
 		}
-		if json.Unmarshal(*facet, &f) == nil && f.AllowMultipleValues {
+		if json.Unmarshal(*facet, &f) == nil && (f.AllowMultipleValues || f.AllowMultipleSelection) {
 			return true
 		}
 	}
 	return false
+}
+
+// closedChoices returns a choice column's options when it accepts no other
+// value. SharePoint stores any string written through Graph, so xql checks.
+func closedChoices(c *columnJSON) []string {
+	if c.Choice == nil || c.Choice.AllowTextEntry {
+		return nil
+	}
+	return c.Choice.Choices
+}
+
+func calculatedOutput(c *columnJSON) FieldType {
+	if c.Calculated == nil {
+		return ""
+	}
+	switch c.Calculated.OutputType {
+	case "number", "currency":
+		return FieldNumber
+	case "boolean":
+		return FieldBoolean
+	case "dateTime":
+		return FieldDateTime
+	}
+	return FieldText
 }
 
 // shownSystemColumns are the read-only system columns SELECT * keeps, being
@@ -337,8 +373,9 @@ func detectFieldType(c *columnJSON) FieldType {
 
 // normalizeFields fills in the values Graph returns under a different key
 // than the column name: the item number arrives as "id", and a single-value
-// person or lookup column as "<Name>LookupId", both as strings. Each is stored under
-// its column name as a number, so it reads, sorts and compares like one.
+// person or lookup column as "<Name>LookupId", both as strings. Each is
+// stored under its column name as a number, so it reads, sorts and compares
+// like one. A multi-value column becomes the text SharePoint displays.
 func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
 	if _, ok := fields["ID"]; !ok {
 		if n, ok := numericString(fields["id"]); ok {
@@ -346,22 +383,72 @@ func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
 		}
 	}
 	for name, info := range schema {
-		if !info.isLookupID() {
-			continue
-		}
-		if _, ok := fields[name]; ok {
-			continue
-		}
-		if n, ok := numericString(fields[name+"LookupId"]); ok {
-			fields[name] = n
+		switch {
+		case info.isLookupID():
+			if _, ok := fields[name]; ok {
+				continue
+			}
+			if n, ok := numericString(fields[name+"LookupId"]); ok {
+				fields[name] = n
+			}
+		case info.Multi:
+			if values, ok := fields[name].([]any); ok {
+				fields[name] = joinLookupValues(values)
+			}
 		}
 	}
 }
 
-// isLookupID reports whether a column reads and filters as the numeric ID of
-// the one item or person it points at.
+// joinLookupValues renders a multi-value person or lookup column the way
+// SharePoint displays it: the names or titles, separated by "; ".
+func joinLookupValues(values []any) string {
+	names := make([]string, 0, len(values))
+	for _, v := range values {
+		if m, ok := v.(map[string]any); ok {
+			if s, ok := m["LookupValue"].(string); ok {
+				names = append(names, s)
+			}
+		}
+	}
+	return strings.Join(names, "; ")
+}
+
+// isLookupID reports whether a column reads, filters and writes as the
+// numeric ID of the one item or person it points at, through the field Graph
+// names "<Name>LookupId".
 func (f FieldInfo) isLookupID() bool {
 	return (f.Type == FieldPerson || f.Type == FieldLookup) && !f.Multi
+}
+
+// writeType is the type a value written to the column must have: a lookup
+// ID is a number.
+func (f FieldInfo) writeType() FieldType {
+	if f.isLookupID() {
+		return FieldNumber
+	}
+	return f.Type
+}
+
+// writeKey is the field name a write to the column goes under.
+func (f FieldInfo) writeKey() string {
+	if f.isLookupID() {
+		return f.Name + "LookupId"
+	}
+	return f.Name
+}
+
+// checkChoice rejects a value outside a closed choice column's options.
+func (f FieldInfo) checkChoice(v any) error {
+	s, ok := v.(string)
+	if !ok || len(f.Choices) == 0 {
+		return nil
+	}
+	for _, c := range f.Choices {
+		if s == c {
+			return nil
+		}
+	}
+	return fmt.Errorf("column %q: %q is not one of its choices (%s)", f.Name, s, strings.Join(f.Choices, ", "))
 }
 
 func numericString(v any) (float64, bool) {

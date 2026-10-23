@@ -82,12 +82,12 @@ func TestToOData(t *testing.T) {
 		{
 			name: "boolean true",
 			pred: cmp("Archived", "=", vbool(true)),
-			want: "fields/Archived eq true",
+			want: "fields/Archived eq 1",
 		},
 		{
 			name: "boolean false",
 			pred: cmp("Archived", "=", vbool(false)),
-			want: "fields/Archived eq false",
+			want: "fields/Archived eq 0",
 		},
 
 		// DateTime normalization

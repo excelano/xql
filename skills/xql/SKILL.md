@@ -107,11 +107,11 @@ The type does not change what is written. A committed write rewrites only the ro
 
 The whole grammar works in `WHERE`, with the same case-sensitive `=` and `LIKE` as on a CSV file. Graph narrows the fetch where SharePoint can (comparisons, text `=`, a prefix `LIKE`) and xql evaluates the rest, so a `WHERE` made only of conditions SharePoint cannot answer, such as `Title LIKE '%x%'` or `ID = 5`, reads the whole list. On a large list, add a narrowing condition when you have one.
 
-`ID` is the item number. Person and lookup columns read as the numeric ID they point at (`WHERE Author = 11`).
+`ID` is the item number. A person or single-value lookup column reads and writes as the numeric ID it points at (`WHERE Author = 11`, `SET Owner = 11`); a multi-value one reads as the names SharePoint displays, joined by `; `.
 
 Every column has an internal name (what Graph uses, often `field_5`) and a display name (what the SharePoint UI shows), and either resolves. `describe` prints both when they differ, and two columns sharing a display name raise an ambiguous-column error that lists the internal names.
 
-Writes validate against the list schema before any Graph call. Person, Lookup, Hyperlink and Calculated columns are rejected on write.
+Writes validate against the list schema before any Graph call, including a choice column's options. Multi-value person and lookup, hyperlink and calculated columns are rejected on write.
 
 Sign-in is device-code OAuth, with the token cached in `~/.config/excelano/sp-token.json`, shared with the xfiles tools. `xql auth --json` reports `signed_in`, `account`, `tenant`, `token_expires` and `scopes` without starting a sign-in and exits 0 either way. Run it before a batch of `xql sp` calls on a machine you are unsure of, and branch on `signed_in`. If it is false, ask the user to run `xql sp <list-url>` once from their own terminal.
 

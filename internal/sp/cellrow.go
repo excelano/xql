@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/excelano/xql/internal/cell"
 )
@@ -15,15 +16,20 @@ import (
 // shared evaluator. Number is mapped to TypeFloat (not TypeInt) because Graph
 // returns JSON numbers and json.Unmarshal into any always produces float64;
 // even integer-valued list-item numbers arrive as floats. A single-value
-// person or lookup column reads as its numeric LookupId (normalizeFields).
-// Multi-value person and lookup columns, hyperlink, and the read-only
-// calculated/unknown types fall back to TypeString — they round-trip as
+// person or lookup column reads as its numeric LookupId (normalizeFields),
+// and a calculated column as the type its formula produces. Multi-value
+// person and lookup columns, hyperlink, and the unknown types fall back to
+// TypeString — they round-trip as
 // rendered text for read paths but cannot be written.
 func (f FieldInfo) CellType() cell.ColumnType {
 	if f.isLookupID() {
 		return cell.TypeFloat
 	}
-	switch f.Type {
+	t := f.Type
+	if t == FieldCalculated {
+		t = f.Output
+	}
+	switch t {
 	case FieldNumber:
 		return cell.TypeFloat
 	case FieldBoolean:
@@ -105,14 +111,26 @@ func BuildCellTable(bound *BoundList, items []listItem) (*cell.Table, error) {
 func convertField(raw any, t cell.ColumnType) (cell.Cell, error) {
 	switch t {
 	case cell.TypeBool:
+		// A calculated yes/no column carries its value as "1" or "0".
+		if str, ok := raw.(string); ok {
+			switch strings.ToLower(str) {
+			case "":
+				return cell.Cell{Null: true}, nil
+			case "1", "true":
+				return cell.Cell{Bool: true}, nil
+			case "0", "false":
+				return cell.Cell{Bool: false}, nil
+			}
+		}
 		b, ok := raw.(bool)
 		if !ok {
 			return cell.Cell{}, fmt.Errorf("expected bool, got %T", raw)
 		}
 		return cell.Cell{Bool: b}, nil
 	case cell.TypeFloat:
-		// Lookup-typed system columns such as ItemChildCount carry their
-		// number as a string, empty when there is none.
+		// Calculated columns and lookup-typed system columns such as
+		// ItemChildCount carry their number as a string, empty when there
+		// is none.
 		if str, ok := raw.(string); ok {
 			if str == "" {
 				return cell.Cell{Null: true}, nil

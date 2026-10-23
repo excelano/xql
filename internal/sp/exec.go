@@ -1159,7 +1159,7 @@ func (e *Executor) executeInsert(ctx context.Context, ins *parse.InsertStmt, com
 
 	fmt.Fprintf(e.Out, "Would insert row into %s:\n", e.Bound.DisplayName)
 	for _, c := range ins.Columns {
-		fmt.Fprintf(e.Out, "  %s = %s\n", c, jsonInline(body[c]))
+		fmt.Fprintf(e.Out, "  %s = %s\n", c, jsonInline(body[e.Bound.Schema[c].writeKey()]))
 	}
 
 	proceed, msg := e.decideCommit(commit)
@@ -1320,14 +1320,14 @@ func (e *Executor) validateAssignmentExpr(col string, expr parse.Expr, cellSchem
 	if info.ReadOnly {
 		return fmt.Errorf("column %q is read-only", col)
 	}
-	if !isWritableType(info.Type) {
-		return fmt.Errorf("column %q has type %s; writes to %s columns are not supported in v1", col, info.Type, info.Type)
+	if err := checkWritable(col, info); err != nil {
+		return err
 	}
 	resultType, err := eval.ExprType(expr, cellSchema)
 	if err != nil {
 		return fmt.Errorf("column %q: %w", col, err)
 	}
-	if !typesCompatibleForUpdate(resultType, info.Type) {
+	if !typesCompatibleForUpdate(resultType, info.writeType()) {
 		return fmt.Errorf("column %q: expression produces %s, target SharePoint column is %s", col, resultType, info.Type)
 	}
 	return nil
@@ -1363,25 +1363,24 @@ func typesCompatibleForUpdate(src cell.ColumnType, target FieldType) bool {
 func (e *Executor) buildRowBody(assigns []parse.Assignment, row cell.Row, ctx *eval.EvalContext) (map[string]any, error) {
 	body := map[string]any{}
 	for _, a := range assigns {
-		if lit, ok := a.Value.(*parse.LiteralExpr); ok {
-			info := e.Bound.Schema[a.Column]
-			fj, err := valueToFieldJSON(lit.Value, info.Type)
-			if err != nil {
-				return nil, fmt.Errorf("column %q: %v", a.Column, err)
-			}
-			body[a.Column] = fj
-			continue
-		}
 		info := e.Bound.Schema[a.Column]
-		result, err := eval.EvalExpr(a.Value, row, ctx)
+		var fj any
+		var err error
+		if lit, ok := a.Value.(*parse.LiteralExpr); ok {
+			fj, err = valueToFieldJSON(lit.Value, info.writeType())
+		} else {
+			var result eval.EvalCell
+			if result, err = eval.EvalExpr(a.Value, row, ctx); err == nil {
+				fj, err = evalCellToFieldJSON(result, info.writeType())
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("column %q: %v", a.Column, err)
 		}
-		fj, err := evalCellToFieldJSON(result, info.Type)
-		if err != nil {
-			return nil, fmt.Errorf("column %q: %v", a.Column, err)
+		if err := info.checkChoice(fj); err != nil {
+			return nil, err
 		}
-		body[a.Column] = fj
+		body[info.writeKey()] = fj
 	}
 	return body, nil
 }
@@ -1537,24 +1536,33 @@ func validateAssignment(col string, v parse.Value, schema map[string]FieldInfo) 
 	if info.ReadOnly {
 		return FieldInfo{}, fmt.Errorf("column %q is read-only", col)
 	}
-	if !isWritableType(info.Type) {
-		return FieldInfo{}, fmt.Errorf("column %q has type %s; writes to %s columns are not supported in v1", col, info.Type, info.Type)
+	if err := checkWritable(col, info); err != nil {
+		return FieldInfo{}, err
 	}
 	if v.Kind == parse.ValNull {
 		return info, nil
 	}
-	if err := valueMatchesType(v, info.Type); err != nil {
+	if err := valueMatchesType(v, info.writeType()); err != nil {
 		return FieldInfo{}, fmt.Errorf("column %q: %v", col, err)
+	}
+	if err := info.checkChoice(v.Str); v.Kind == parse.ValString && err != nil {
+		return FieldInfo{}, err
 	}
 	return info, nil
 }
 
-func isWritableType(t FieldType) bool {
-	switch t {
+// checkWritable rejects a column whose type xql cannot write: a multi-value
+// person or lookup, a hyperlink, a calculated or an unrecognized column.
+func checkWritable(col string, info FieldInfo) error {
+	switch info.writeType() {
 	case FieldText, FieldNote, FieldNumber, FieldBoolean, FieldDateTime, FieldChoice:
-		return true
+		return nil
 	}
-	return false
+	kind := string(info.Type)
+	if info.Multi {
+		kind = "multi-value " + kind
+	}
+	return fmt.Errorf("column %q is a %s column, which xql cannot write", col, kind)
 }
 
 func valueMatchesType(v parse.Value, t FieldType) error {

@@ -22,7 +22,9 @@ func execTestSchema() map[string]FieldInfo {
 		"Active":   {Name: "Active", Type: FieldBoolean},
 		"Due":      {Name: "Due", Type: FieldDateTime},
 		"Status":   {Name: "Status", Type: FieldChoice},
+		"Stage":    {Name: "Stage", Type: FieldChoice, Choices: []string{"Open", "Closed"}},
 		"Owner":    {Name: "Owner", Type: FieldPerson},
+		"Readers":  {Name: "Readers", Type: FieldPerson, Multi: true},
 		"Parent":   {Name: "Parent", Type: FieldLookup},
 		"Link":     {Name: "Link", Type: FieldHyperlink},
 		"Computed": {Name: "Computed", Type: FieldCalculated},
@@ -62,11 +64,20 @@ func TestValidateAssignment(t *testing.T) {
 		{"datetime rejects unparseable string", "Due", vstr("yesterday"), "invalid datetime"},
 		{"choice rejects bool", "Status", vbool(true), "expected string"},
 
+		// closed choices
+		{"choice accepts one of its options", "Stage", vstr("Open"), ""},
+		{"choice rejects a value outside its options", "Stage", vstr("Bogus"), "not one of its choices (Open, Closed)"},
+		{"open choice accepts any string", "Status", vstr("Bogus"), ""},
+
+		// person and lookup columns write by ID
+		{"person accepts an ID", "Owner", vnum("11"), ""},
+		{"person rejects a name", "Owner", vstr("u@x"), "expected number"},
+		{"lookup accepts an ID", "Parent", vnum("1"), ""},
+
 		// unsupported column types
-		{"person column rejected", "Owner", vstr("u@x"), "not supported in v1"},
-		{"lookup column rejected", "Parent", vnum("1"), "not supported in v1"},
-		{"hyperlink column rejected", "Link", vstr("https://x"), "not supported in v1"},
-		{"calculated column rejected", "Computed", vstr("x"), "not supported in v1"},
+		{"multi-value person rejected", "Readers", vnum("11"), "multi-value person column, which xql cannot write"},
+		{"hyperlink column rejected", "Link", vstr("https://x"), "hyperlink column, which xql cannot write"},
+		{"calculated column rejected", "Computed", vstr("x"), "calculated column, which xql cannot write"},
 
 		// unknown / read-only
 		{"unknown column", "DoesNotExist", vstr("x"), `unknown column "DoesNotExist"`},
@@ -126,18 +137,11 @@ func TestValueToFieldJSON(t *testing.T) {
 	}
 }
 
-func TestIsWritableType(t *testing.T) {
-	writable := []FieldType{FieldText, FieldNote, FieldNumber, FieldBoolean, FieldDateTime, FieldChoice}
-	notWritable := []FieldType{FieldPerson, FieldLookup, FieldHyperlink, FieldCalculated, FieldUnknown}
-
-	for _, ft := range writable {
-		if !isWritableType(ft) {
-			t.Errorf("expected %s to be writable", ft)
-		}
-	}
-	for _, ft := range notWritable {
-		if isWritableType(ft) {
-			t.Errorf("expected %s to NOT be writable", ft)
+func TestWriteKey(t *testing.T) {
+	schema := execTestSchema()
+	for col, want := range map[string]string{"Title": "Title", "Owner": "OwnerLookupId", "Parent": "ParentLookupId", "Readers": "Readers"} {
+		if got := schema[col].writeKey(); got != want {
+			t.Errorf("writeKey(%s) = %q, want %q", col, got, want)
 		}
 	}
 }
@@ -182,12 +186,12 @@ func TestValidateAssignmentsRejectsLiteralOnUnsupportedType(t *testing.T) {
 	e := &Executor{Bound: &BoundList{Schema: execTestSchema()}}
 	err := e.validateAssignments([]parse.Assignment{
 		{Column: "Title", Value: litE(vstr("ok"))},
-		{Column: "Owner", Value: litE(vstr("u@x"))},
+		{Column: "Link", Value: litE(vstr("https://x"))},
 	})
 	if err == nil {
-		t.Fatalf("expected error for Person column, got nil")
+		t.Fatalf("expected error for Hyperlink column, got nil")
 	}
-	if !strings.Contains(err.Error(), "not supported") {
+	if !strings.Contains(err.Error(), "cannot write") {
 		t.Fatalf("error %q does not mention support", err.Error())
 	}
 }
