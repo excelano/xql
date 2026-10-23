@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package xql
 
 import (
@@ -12,13 +15,13 @@ import (
 // misreport itself.
 func TestStampSitsUnderTheFrontmatterNotInsideIt(t *testing.T) {
 	body := "---\nname: xql\ndescription: x\n---\n\n# xql\n"
-	out := stampSkill(body, "9.9.9")
+	out := stampSkill(body, "0123abcd")
 
 	end := strings.Index(out, "\n---\n") + len("\n---\n")
-	if strings.Contains(out[:end], "This skill documents") {
+	if strings.Contains(out[:end], "This skill is revision") {
 		t.Fatalf("the stamp landed inside the YAML block:\n%s", out)
 	}
-	if !strings.Contains(out[end:], "This skill documents xql 9.9.9") {
+	if !strings.Contains(out[end:], "This skill is revision 0123abcd.") {
 		t.Fatalf("the stamp is missing from the body:\n%s", out)
 	}
 	if !strings.HasSuffix(out, "# xql\n") {
@@ -27,21 +30,50 @@ func TestStampSitsUnderTheFrontmatterNotInsideIt(t *testing.T) {
 }
 
 func TestStampRoundTripsThroughTheReader(t *testing.T) {
-	stamped := stampSkill("---\nname: xql\n---\n\nbody\n", "0.5.1")
-	if got := stampedVersion(stamped); got != "0.5.1" {
-		t.Fatalf("stampedVersion = %q, want 0.5.1", got)
+	stamped := stampSkill("---\nname: xql\n---\n\nbody\n", "1a2b3c4d")
+	if got := stampedLabel(stamped); got != "1a2b3c4d" {
+		t.Fatalf("stampedLabel = %q, want 1a2b3c4d", got)
 	}
 }
 
-func TestUnstampedSkillReadsBackAsNoVersion(t *testing.T) {
-	if got := stampedVersion("---\nname: xql\n---\n\nbody\n"); got != "" {
-		t.Fatalf("stampedVersion = %q, want empty", got)
+// A skill installed before revisions carries a version stamp, and the first
+// update has to name it.
+func TestVersionStampReadsBackAsToolAndVersion(t *testing.T) {
+	old := "---\nname: xql\n---\n\n> This skill documents " + skillTool + " 0.5.1. If `x -V` " +
+		"reports a different\n> version, the skill is stale.\n"
+	if got, want := stampedLabel(old), skillTool+" 0.5.1"; got != want {
+		t.Fatalf("stampedLabel = %q, want %q", got, want)
+	}
+}
+
+func TestUnstampedSkillReadsBackAsNothing(t *testing.T) {
+	if got := stampedLabel("---\nname: xql\n---\n\nbody\n"); got != "" {
+		t.Fatalf("stampedLabel = %q, want empty", got)
+	}
+}
+
+// The same fixture and answer are in the Rust tools' tests, which is what
+// holds the two languages to one canonical form.
+func TestRevisionMatchesTheRustTools(t *testing.T) {
+	got := revisionOf(map[string]string{"reference.md": "b\n", "SKILL.md": "a\n"})
+	if got != "0cce3525" {
+		t.Fatalf("revisionOf = %q, want 0cce3525", got)
+	}
+}
+
+func TestStampCarriesTheRevisionVersionPrints(t *testing.T) {
+	files, err := skillPayload(SkillRevision())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stampedLabel(files["SKILL.md"]); got != SkillRevision() {
+		t.Fatalf("the stamp names %q, -V names %q", got, SkillRevision())
 	}
 }
 
 // The real SKILL.md must survive stamping with its frontmatter intact.
 func TestShippedSkillKeepsItsFrontmatter(t *testing.T) {
-	files, err := skillPayload("1.2.3")
+	files, err := skillPayload("0123abcd")
 	if err != nil {
 		t.Fatal(err)
 	}

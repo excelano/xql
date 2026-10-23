@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 // Command xql is the Excelano Query Language CLI: one binary, one language,
 // many backends. Backends register a name, optional file-extension list, and
 // a Run function; the dispatcher routes argv[1:] to whichever backend matches.
@@ -61,12 +64,12 @@ func dispatch(args []string, reg []Backend, stdout, stderr io.Writer) int {
 		printUsage(stdout, reg)
 		return 0
 	case "-V", "--version":
-		fmt.Fprintf(stdout, "xql %s\n", resolveVersion())
+		fmt.Fprintf(stdout, "xql %s (skill %s)\n", resolveVersion(), xql.SkillRevision())
 		return 0
 	// Terminal actions: they touch the user's skills directory and nothing
 	// else, so no backend is bound and no credential is read on the way through.
 	case "--install-skill":
-		return xql.InstallSkill(resolveVersion())
+		return xql.InstallSkill()
 	case "--uninstall-skill":
 		return xql.UninstallSkill()
 	// The bare state command binds no list and reads the token cache only,

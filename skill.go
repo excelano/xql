@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package xql
 
 // Package xql exists for one reason: //go:embed cannot contain ".." or escape
@@ -18,20 +21,22 @@ package xql
 // `xql --install-skill` — true everywhere.
 //
 // The contract this implements is fleet-wide and pinned in
-// ~/notes/skill_fleet_triage.md; four implementations across two languages
-// drift otherwise.
+// ~/notes/skill_fleet_triage.md, so the Go and Rust tools cannot drift.
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
-// skillTool is the canonical command for this skill, named in the version
+// skillTool is the canonical command for this skill, named in the revision
 // stamp. Deliberately a constant rather than the invoked name: a repo can ship
 // several binaries over one skill — the five xfiles tools, for instance — and
 // if the stamp named whichever one ran, the bytes would differ per binary and
@@ -84,16 +89,16 @@ func skillDest() (string, error) {
 	return filepath.Join(home, ".claude", "skills", skillName), nil
 }
 
-// stampSkill inserts the version stamp directly after the YAML frontmatter.
+// stampSkill inserts the revision stamp directly after the YAML frontmatter.
 //
 // Outside the frontmatter, never inside it: the description in that block is
 // what decides whether the skill fires at all, and a stamp that broke the parse
 // would take the whole skill down rather than merely misreport itself.
-func stampSkill(body, version string) string {
+func stampSkill(body, revision string) string {
 	note := fmt.Sprintf(
-		"> This skill documents %s %s. If `%s -V` reports a different\n"+
-			"> version, the skill is stale — run `%s --install-skill` to refresh it.\n",
-		skillTool, version, skillTool, skillTool)
+		"> This skill is revision %s. If `%s -V` reports a different skill\n"+
+			"> revision, the skill is stale — run `%s --install-skill` to refresh it.\n",
+		revision, skillTool, skillTool)
 	const fence = "---\n"
 	if rest, ok := strings.CutPrefix(body, fence); ok {
 		if i := strings.Index(rest, "\n---\n"); i >= 0 {
@@ -105,24 +110,33 @@ func stampSkill(body, version string) string {
 	return note + "\n" + body
 }
 
-// stampedVersion reads a version back out of a stamp written by an earlier
-// install, so an update can report what it replaced.
-func stampedVersion(body string) string {
-	prefix := fmt.Sprintf("> This skill documents %s ", skillTool)
+// stampedLabel reads back what an earlier install stamped: the revision, or
+// for a stamp from before revisions, the tool and version it named.
+func stampedLabel(body string) string {
+	old := fmt.Sprintf("> This skill documents %s ", skillTool)
 	for _, line := range strings.Split(body, "\n") {
-		rest, ok := strings.CutPrefix(line, prefix)
-		if !ok {
-			continue
+		if rest, ok := strings.CutPrefix(line, "> This skill is revision "); ok {
+			return firstWord(rest)
 		}
-		if f := strings.Fields(rest); len(f) > 0 {
-			return strings.TrimSuffix(f[0], ".")
+		if rest, ok := strings.CutPrefix(line, old); ok {
+			if v := firstWord(rest); v != "" {
+				return skillTool + " " + v
+			}
 		}
 	}
 	return ""
 }
 
-// skillPayload is the exact bytes this build would write, keyed by filename.
-func skillPayload(version string) (map[string]string, error) {
+func firstWord(s string) string {
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(f[0], ".")
+}
+
+// embeddedSkill is the skill as compiled in, unstamped, keyed by filename.
+func embeddedSkill() (map[string]string, error) {
 	out := map[string]string{}
 	dir := filepath.ToSlash(filepath.Join("skills", skillName))
 	entries, err := fs.ReadDir(skillFS, dir)
@@ -137,18 +151,47 @@ func skillPayload(version string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		text := string(b)
-		if e.Name() == "SKILL.md" {
-			text = stampSkill(text, version)
-		}
-		out[e.Name()] = text
+		out[e.Name()] = string(b)
 	}
 	return out, nil
 }
 
+// SkillRevision is the embedded skill's revision, which the stamp and -V both
+// carry.
+func SkillRevision() string {
+	files, err := embeddedSkill()
+	if err != nil {
+		panic(err) // the files are compiled in, so this cannot fail at run time
+	}
+	return revisionOf(files)
+}
+
+// revisionOf is the first eight hex digits of SHA-256 over the files sorted by
+// path, each fed as its path, a NUL, its byte length in decimal, a NUL, and its
+// bytes. The Rust tools hash the same form, so equal skill text gives an equal
+// revision across the fleet.
+func revisionOf(files map[string]string) string {
+	h := sha256.New()
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		fmt.Fprintf(h, "%s\x00%d\x00%s", name, len(files[name]), files[name])
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)[:4])
+}
+
+// skillPayload is the exact bytes an install would write, keyed by filename.
+func skillPayload(revision string) (map[string]string, error) {
+	out, err := embeddedSkill()
+	if err != nil {
+		return nil, err
+	}
+	out["SKILL.md"] = stampSkill(out["SKILL.md"], revision)
+	return out, nil
+}
+
 // InstallSkill handles --install-skill. Returns the process exit code.
-func InstallSkill(version string) int {
+func InstallSkill() int {
 	me := invokedAs()
+	revision := SkillRevision()
 	dest, err := skillDest()
 	if err != nil {
 		return skillFail(err.Error())
@@ -164,7 +207,7 @@ func InstallSkill(version string) int {
 		return 0
 	}
 
-	files, err := skillPayload(version)
+	files, err := skillPayload(revision)
 	if err != nil {
 		return skillFail(fmt.Sprintf("cannot read the embedded skill: %v", err))
 	}
@@ -179,7 +222,7 @@ func InstallSkill(version string) int {
 		}
 	}
 	if unchanged {
-		fmt.Printf("%s: skill already current at %s (%s %s)\n", me, dest, skillTool, version)
+		fmt.Printf("%s: skill already current at %s (skill %s)\n", me, dest, revision)
 		return 0
 	}
 
@@ -195,14 +238,14 @@ func InstallSkill(version string) int {
 	}
 
 	if fresh {
-		fmt.Printf("%s: installed skill to %s (%s %s)\n", me, dest, skillTool, version)
+		fmt.Printf("%s: installed skill to %s (skill %s)\n", me, dest, revision)
 		fmt.Printf("%s: restart Claude Code to pick it up.\n", me)
 		return 0
 	}
-	if old := stampedVersion(string(previous)); old != "" && old != version {
-		fmt.Printf("%s: updated skill at %s (%s → %s)\n", me, dest, old, version)
+	if old := stampedLabel(string(previous)); old != "" && old != revision {
+		fmt.Printf("%s: updated skill at %s (%s → %s)\n", me, dest, old, revision)
 	} else {
-		fmt.Printf("%s: updated skill at %s (%s %s)\n", me, dest, skillTool, version)
+		fmt.Printf("%s: updated skill at %s (skill %s)\n", me, dest, revision)
 	}
 	fmt.Printf("%s: restart Claude Code to pick up the change.\n", me)
 	return 0

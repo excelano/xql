@@ -248,7 +248,7 @@ An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill shi
 xql --install-skill
 ```
 
-That writes `~/.claude/skills/xql/` and stamps in the version it came from, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `xql --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
+That writes `~/.claude/skills/xql/` and stamps in the skill's revision, which `xql -V` also prints, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `xql --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
 The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, or a build from source.
 

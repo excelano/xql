@@ -1,9 +1,14 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package main
 
 import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/excelano/xql"
 )
 
 // recorder is a backend.Run that records the args it was called with.
@@ -68,6 +73,11 @@ func TestDispatch(t *testing.T) {
 			name: "--version prints the tool name alongside the version",
 			args: []string{"--version"},
 			want: want{code: 0, stdoutSubstr: "xql "},
+		},
+		{
+			name: "-V names the skill revision the stamp carries",
+			args: []string{"-V"},
+			want: want{code: 0, stdoutSubstr: "(skill " + xql.SkillRevision() + ")\n"},
 		},
 		{
 			name: "subcommand name routes with empty args",
