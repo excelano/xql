@@ -98,6 +98,26 @@ type Table struct {
 	Rows      []Row
 	Delim     rune
 	HasHeader bool
+	Source    *Source
+}
+
+// Source is the text a file-backed Table was read from, kept so that a write
+// reproduces every row no statement changed byte for byte. Records aligns
+// with Table.Rows.
+type Source struct {
+	BOM     bool
+	LineEnd string
+	Header  string
+	Records []Record
+	Trailer string
+}
+
+// Record is one row as read. Text is the record's source text with its
+// terminator, and is cleared when a statement changes the row. Extra holds
+// any fields past the header's width, which a changed row still writes.
+type Record struct {
+	Text  string
+	Extra []string
 }
 
 // ParseDateString tries the ISO 8601 forms XQL supports. Anything outside

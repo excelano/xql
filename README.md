@@ -164,6 +164,8 @@ Parsing uses `LazyQuotes = true`, which is forgiving about bare quotes mid-field
 
 Headers are trimmed of leading and trailing whitespace; the load fails clearly if a header is empty or duplicates another header, since both quietly corrupt schema lookups.
 
+A committed write changes only the rows the statement touches. Every other row is written back as its original text, quoting and line ending included, and the file keeps its BOM, its header line and any trailing blank lines. A row with more fields than the header keeps the extra fields, even when it is updated. Rows a write changes or inserts use the file's line ending.
+
 ### Type inference
 
 `xql` samples the first 1024 rows of a CSV and infers a type per column: `int`, `float`, `bool`, `date`, or `string`. Comparisons use the inferred type, so `Priority > 2` does numeric compare and `Modified < '2024-01-01'` does date compare. The `describe` command shows what was inferred. Override at startup with `--type Name=string,Priority=int` if inference picks wrong.

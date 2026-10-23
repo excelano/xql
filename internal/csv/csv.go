@@ -85,21 +85,48 @@ func LoadCSVReader(label string, src io.Reader, opts LoadOptions) (*cell.Table, 
 	// "Save as CSV UTF-8" prepends one, and encoding/csv would otherwise
 	// fold it into the first column header.
 	br := bufio.NewReader(src)
+	bomSkipped := false
 	if peek, _ := br.Peek(len(utf8BOM)); len(peek) == len(utf8BOM) && string(peek) == string(utf8BOM) {
 		_, _ = br.Discard(len(utf8BOM))
+		bomSkipped = true
 	}
 
-	r := csv.NewReader(br)
+	data, err := io.ReadAll(br)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", label, err)
+	}
+	text := string(data)
+
+	r := csv.NewReader(strings.NewReader(text))
 	r.Comma = delim
 	r.FieldsPerRecord = -1
 	r.LazyQuotes = true
 
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", label, err)
+	// Each record's source text runs from the previous record's end to its
+	// own, so blank lines the reader skips stay with the record after them.
+	var records [][]string
+	var texts []string
+	var offset int64
+	for {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", label, err)
+		}
+		next := r.InputOffset()
+		records = append(records, rec)
+		texts = append(texts, text[offset:next])
+		offset = next
 	}
 	if len(records) == 0 {
 		return nil, fmt.Errorf("%s is empty", label)
+	}
+	source := &cell.Source{
+		BOM:     bomSkipped,
+		LineEnd: lineEnd(texts[0]),
+		Trailer: text[offset:],
 	}
 
 	var columns []string
@@ -119,17 +146,22 @@ func LoadCSVReader(label string, src io.Reader, opts LoadOptions) (*cell.Table, 
 		if err := validateHeaders(columns); err != nil {
 			return nil, fmt.Errorf("%s: %w", label, err)
 		}
+		source.Header = texts[0]
 		dataStart = 1
 	}
 	ncol := len(columns)
 
 	rawRows := make([][]string, 0, len(records)-dataStart)
-	for _, rec := range records[dataStart:] {
+	source.Records = make([]cell.Record, 0, len(records)-dataStart)
+	for i, rec := range records[dataStart:] {
 		row := make([]string, ncol)
-		for i := 0; i < ncol && i < len(rec); i++ {
-			row[i] = rec[i]
-		}
+		copy(row, rec)
 		rawRows = append(rawRows, row)
+		record := cell.Record{Text: texts[dataStart+i]}
+		if len(rec) > ncol {
+			record.Extra = rec[ncol:]
+		}
+		source.Records = append(source.Records, record)
 	}
 
 	sampleN := opts.SampleN
@@ -167,12 +199,26 @@ func LoadCSVReader(label string, src io.Reader, opts LoadOptions) (*cell.Table, 
 		Rows:      rows,
 		Delim:     delim,
 		HasHeader: !opts.NoHeader,
+		Source:    source,
 	}, nil
 }
 
+// lineEnd reports the terminator a record's source text ends with, so that
+// rows written fresh match the file around them. A file of one unterminated
+// line gets "\n".
+func lineEnd(record string) string {
+	if strings.HasSuffix(record, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
 // SaveCSV writes the cell.Table back to its bound path (or to dst if non-empty).
-// Cells read from the file emit their source text; assigned cells emit their
-// canonical string form, with NULL as an empty field.
+// A row no statement changed is written as its source text, so its quoting,
+// line ending and any fields past the header survive, along with the file's
+// BOM, header line and trailing blank lines. A changed or inserted row is
+// encoded from its cells: cells read from the file emit their source text,
+// assigned cells their canonical string form, with NULL as an empty field.
 func SaveCSV(t *cell.Table, dst string) error {
 	if dst == "" {
 		dst = t.Path
@@ -183,26 +229,61 @@ func SaveCSV(t *cell.Table, dst string) error {
 	}
 	defer f.Close()
 
-	w := csv.NewWriter(f)
-	w.Comma = t.Delim
-	defer w.Flush()
+	src := t.Source
+	if src == nil || len(src.Records) != len(t.Rows) {
+		src = &cell.Source{LineEnd: "\n", Records: make([]cell.Record, len(t.Rows))}
+	}
+	out := bufio.NewWriter(f)
+	enc := csv.NewWriter(out)
+	enc.Comma = t.Delim
+	enc.UseCRLF = src.LineEnd == "\r\n"
 
+	// Only the file's last line can lack a terminator; it gets one when
+	// anything is written after it, as after an INSERT.
+	writeText := func(text string, last bool) {
+		out.WriteString(text)
+		if !last && !strings.HasSuffix(text, "\n") {
+			out.WriteString(src.LineEnd)
+		}
+	}
+	if src.BOM {
+		out.Write(utf8BOM)
+	}
+	encoded := false
 	if t.HasHeader {
-		if err := w.Write(t.Columns); err != nil {
+		if src.Header != "" {
+			writeText(src.Header, len(t.Rows) == 0)
+		} else if err := enc.Write(t.Columns); err != nil {
 			return fmt.Errorf("writing header: %w", err)
+		} else {
+			encoded = true
 		}
 	}
 	rec := make([]string, len(t.Columns))
-	for _, row := range t.Rows {
+	for ri, row := range t.Rows {
+		record := src.Records[ri]
+		if record.Text != "" {
+			if encoded {
+				enc.Flush()
+				encoded = false
+			}
+			writeText(record.Text, ri == len(t.Rows)-1)
+			continue
+		}
+		encoded = true
 		for i, name := range t.Columns {
 			rec[i] = row[i].Text(t.Schema[name].Type)
 		}
-		if err := w.Write(rec); err != nil {
+		if err := enc.Write(append(rec, record.Extra...)); err != nil {
 			return fmt.Errorf("writing row: %w", err)
 		}
 	}
-	w.Flush()
-	return w.Error()
+	enc.Flush()
+	if err := enc.Error(); err != nil {
+		return err
+	}
+	out.WriteString(src.Trailer)
+	return out.Flush()
 }
 
 // inferColumn picks the most specific cell.ColumnType where every non-empty cell

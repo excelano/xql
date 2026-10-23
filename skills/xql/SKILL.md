@@ -33,7 +33,7 @@ On **SharePoint**, xql owns list rows and columns, and the [xfiles](https://gith
 
 The recipes assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `YEAR`/`MONTH`/`DAY`, expression `GROUP BY`, and `--describe`. An "unknown function" error on one of those names means the installed copy predates it.
 
-They also assume that cells a statement does not assign are written back as they were read. If `--describe` reports a column of 20-digit IDs as `float`, the installed copy predates that: pass `--type Col=string` for every column you are not assigning, or upgrade.
+They also assume that a write leaves the rows and cells it does not change as they were read. If `--describe` reports a column of 20-digit IDs as `float`, the installed copy predates that: pass `--type Col=string` for every column you are not assigning, or upgrade.
 
 Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (macOS), or the install one-liner in the README.
 
@@ -101,7 +101,7 @@ A committed write rewrites the bound CSV, or PATCHes each affected SharePoint it
 
 xql infers `int`, `float`, `bool`, `date` or `string` per column from a sample, and the type decides how comparisons, sorting and arithmetic behave: `Priority > 2` is numeric only if `Priority` inferred as a number. Run `--describe` before relying on a comparison, and pin a column with `--type` when inference picked wrong. A date column of `03/04/2024` infers as `string`, and so do leading-zero codes and IDs too long for a float.
 
-The type does not change what is written. Cells a statement does not assign keep their source text in the committed file and in `SELECT` output, so an `UPDATE` that sets one column leaves every other cell as it was. A cell the column's type cannot parse reads as `NULL` in queries and is still written back unchanged.
+The type does not change what is written. A committed write rewrites only the rows it changes; every other row is written back as its original text, and the file keeps its BOM and line endings. In a changed row, cells the statement does not assign keep their source text, so an `UPDATE` that sets one column leaves every other cell as it was. A cell the column's type cannot parse reads as `NULL` in queries and is still written back unchanged.
 
 ## SharePoint specifics
 

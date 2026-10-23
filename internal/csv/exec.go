@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package csv
 
 import (
@@ -842,6 +845,9 @@ func (e *Executor) executeUpdate(upd *parse.UpdateStmt, commit bool) error {
 		for col, c := range newCells {
 			row[e.colIndex(col)] = c
 		}
+		if src := e.Table.Source; src != nil && idx < len(src.Records) {
+			src.Records[idx].Text = ""
+		}
 	}
 	if err := e.flush(); err != nil {
 		return err
@@ -907,6 +913,9 @@ func (e *Executor) executeDelete(del *parse.DeleteStmt, commit bool) error {
 		return e.flush()
 	}
 	e.Table.Rows = removeIndices(e.Table.Rows, matches)
+	if src := e.Table.Source; src != nil {
+		src.Records = removeIndices(src.Records, matches)
+	}
 	if err := e.flush(); err != nil {
 		return err
 	}
@@ -958,6 +967,9 @@ func (e *Executor) executeInsert(ins *parse.InsertStmt, commit bool) error {
 		}
 	}
 	e.Table.Rows = append(e.Table.Rows, newRow)
+	if src := e.Table.Source; src != nil {
+		src.Records = append(src.Records, cell.Record{})
+	}
 	if err := e.flush(); err != nil {
 		return err
 	}
@@ -1102,8 +1114,8 @@ func (e *Executor) targetPath() string {
 
 // removeIndices returns rows with the listed indices removed. indices must
 // be sorted ascending (findMatches produces them that way).
-func removeIndices(rows []cell.Row, indices []int) []cell.Row {
-	out := make([]cell.Row, 0, len(rows)-len(indices))
+func removeIndices[T any](rows []T, indices []int) []T {
+	out := make([]T, 0, len(rows)-len(indices))
 	j := 0
 	for i, r := range rows {
 		if j < len(indices) && indices[j] == i {

@@ -280,6 +280,7 @@ func TestSaveKeepsUntouchedCells(t *testing.T) {
 		t.Fatal(err)
 	}
 	tbl.Rows[0][3] = cell.Cell{Str: "z"}
+	tbl.Source.Records[0].Text = ""
 	if err := SaveCSV(tbl, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -290,5 +291,74 @@ func TestSaveKeepsUntouchedCells(t *testing.T) {
 	want := strings.Replace(content, ",a\n", ",z\n", 1)
 	if string(got) != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestSaveKeepsFileShape(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shape.csv")
+	content := "\xef\xbb\xbfa,b\r\n" +
+		"1,caf\u00e9\r\n" +
+		"\r\n" +
+		"2,x,EXTRA\r\n" +
+		"3\r\n" +
+		"\"4\",\"q\"\r\n" +
+		"\r\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tbl, err := LoadCSV(path, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCSV(tbl, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != content {
+		t.Fatalf("unchanged save altered the file:\n%q\nwant\n%q", got, content)
+	}
+
+	tbl.Rows[1][1] = cell.Cell{Str: "y"}
+	tbl.Source.Records[1].Text = ""
+	tbl.Rows = append(tbl.Rows, cell.Row{{Int: 5}, {Str: "new"}})
+	tbl.Source.Records = append(tbl.Source.Records, cell.Record{})
+	if err := SaveCSV(tbl, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := "\xef\xbb\xbfa,b\r\n" +
+		"1,caf\u00e9\r\n" +
+		"2,y,EXTRA\r\n" +
+		"3\r\n" +
+		"\"4\",\"q\"\r\n" +
+		"5,new\r\n" +
+		"\r\n"
+	if got, _ := os.ReadFile(path); string(got) != want {
+		t.Fatalf("got\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestSaveTerminatesLastLineBeforeAppend(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "open.csv")
+	if err := os.WriteFile(path, []byte("a\n1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tbl, err := LoadCSV(path, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCSV(tbl, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "a\n1" {
+		t.Fatalf("unchanged save: got %q", got)
+	}
+	tbl.Rows = append(tbl.Rows, cell.Row{{Int: 2}})
+	tbl.Source.Records = append(tbl.Source.Records, cell.Record{})
+	if err := SaveCSV(tbl, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "a\n1\n2\n" {
+		t.Fatalf("after insert: got %q", got)
 	}
 }
