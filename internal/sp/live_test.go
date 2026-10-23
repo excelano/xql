@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/excelano/spauth"
+	"github.com/excelano/graphauth"
 	"github.com/excelano/xql/internal/parse"
 )
 
@@ -30,18 +30,18 @@ func TestLiveRowRoundTrip(t *testing.T) {
 		t.Fatal("XQL_LIVE_LIST is not set; point it at a SharePoint test list to run the live tests")
 	}
 	ctx := context.Background()
-	client, err := spauth.NewPublicClient(spauth.CachePath(), "")
+	client, err := graphauth.SharePoint.NewPublicClient(graphauth.SharePoint.CachePath(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := spauth.CheckStatus(ctx, client, spauth.CachePath())
+	st, err := graphauth.SharePoint.CheckStatus(ctx, client, graphauth.SharePoint.CachePath())
 	if err != nil || !st.SignedIn {
-		t.Fatalf("no usable session in %s; sign in with xql sp or any xfiles tool first (%v %s)", spauth.CachePath(), err, st.Reason)
+		t.Fatalf("no usable session in %s; sign in with xql sp or any xfiles tool first (%v %s)", graphauth.SharePoint.CachePath(), err, st.Reason)
 	}
 	accounts, _ := client.Accounts(ctx)
-	graph := spauth.NewGraphClient(client, accounts[0],
-		spauth.WithTimeout(60*time.Second),
-		spauth.WithHeader("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly"),
+	graph := graphauth.SharePoint.NewGraphClient(client, accounts[0],
+		graphauth.WithTimeout(60*time.Second),
+		graphauth.WithHeader("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly"),
 	)
 	bound, err := ResolveListBinding(ctx, graph, listURL)
 	if err != nil {

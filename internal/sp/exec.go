@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/excelano/spauth"
+	"github.com/excelano/graphauth"
 	"github.com/excelano/xql/internal/cell"
 	"github.com/excelano/xql/internal/eval"
 	"github.com/excelano/xql/internal/parse"
@@ -31,7 +31,7 @@ import (
 // trailing '!'). --exec mode leaves Confirm nil so writes either dry-run or
 // commit explicitly based on --commit.
 type Executor struct {
-	Graph              *spauth.GraphClient
+	Graph              *graphauth.GraphClient
 	Bound              *BoundList
 	Mode               string
 	Headers            bool

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/excelano/spauth"
+	"github.com/excelano/graphauth"
 	"github.com/excelano/xql/internal/parse"
 	"github.com/excelano/xql/internal/repl"
 	"github.com/excelano/xql/internal/sp"
@@ -44,7 +44,7 @@ func runSPImpl(args []string) int {
 		printFlags(w, fs)
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Authentication is device-code via Microsoft Graph; refresh tokens are cached at")
-		fmt.Fprintln(w, spauth.CachePath()+", one session shared with the xfiles tools.")
+		fmt.Fprintln(w, graphauth.SharePoint.CachePath()+", one session shared with the xfiles tools.")
 		fmt.Fprintln(w, "`xql auth` reports that session without starting a sign-in.")
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, exitCodesBlock)
@@ -77,15 +77,15 @@ func runSPImpl(args []string) int {
 	}
 
 	ctx := context.Background()
-	client, err := spauth.NewPublicClient(spauth.CachePath(), legacyTokenCache())
+	client, err := graphauth.SharePoint.NewPublicClient(graphauth.SharePoint.CachePath(), legacyTokenCache())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xql: setup: %v\n", err)
 		return 1
 	}
 
-	result, err := spauth.Authenticate(ctx, client)
+	result, err := graphauth.SharePoint.Authenticate(ctx, client)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "xql: authentication failed: %v%s\n", err, spauth.HintForAuthError(err))
+		fmt.Fprintf(os.Stderr, "xql: authentication failed: %v%s\n", err, graphauth.HintForAuthError(err))
 		return 1
 	}
 
@@ -93,9 +93,9 @@ func runSPImpl(args []string) int {
 	// SharePoint list-item fields; without it any fields/<col> filter returns
 	// 400 invalidRequest. The timeout is per request, and a list page is a
 	// small JSON document.
-	graph := spauth.NewGraphClient(client, result.Account,
-		spauth.WithTimeout(60*time.Second),
-		spauth.WithHeader("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly"),
+	graph := graphauth.SharePoint.NewGraphClient(client, result.Account,
+		graphauth.WithTimeout(60*time.Second),
+		graphauth.WithHeader("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly"),
 	)
 
 	bound, err := sp.ResolveListBinding(ctx, graph, listURL)
@@ -191,5 +191,5 @@ func legacyTokenCache() string {
 // runAuth is the bare `xql auth` command: the state of the SharePoint session
 // this backend shares with the xfiles tools, reported without a sign-in.
 func runAuth(args []string) int {
-	return spauth.AuthCommand(context.Background(), "xql", legacyTokenCache(), args, os.Stdout, os.Stderr)
+	return graphauth.SharePoint.AuthCommand(context.Background(), "xql", legacyTokenCache(), args, os.Stdout, os.Stderr)
 }
