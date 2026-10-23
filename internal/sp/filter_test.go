@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
@@ -9,12 +12,15 @@ import (
 
 func testSchema() map[string]FieldInfo {
 	return map[string]FieldInfo{
-		"Title":    {Name: "Title", Type: FieldText},
-		"Status":   {Name: "Status", Type: FieldChoice},
-		"Priority": {Name: "Priority", Type: FieldNumber},
-		"Archived": {Name: "Archived", Type: FieldBoolean},
-		"DueDate":  {Name: "DueDate", Type: FieldDateTime},
-		"Modified": {Name: "Modified", Type: FieldDateTime},
+		"Title":     {Name: "Title", Type: FieldText},
+		"Status":    {Name: "Status", Type: FieldChoice},
+		"Priority":  {Name: "Priority", Type: FieldNumber},
+		"Archived":  {Name: "Archived", Type: FieldBoolean},
+		"DueDate":   {Name: "DueDate", Type: FieldDateTime},
+		"Modified":  {Name: "Modified", Type: FieldDateTime},
+		"ID":        {Name: "ID", Type: FieldNumber, ReadOnly: true},
+		"Owner":     {Name: "Owner", Type: FieldPerson},
+		"Reviewers": {Name: "Reviewers", Type: FieldPerson, Multi: true},
 	}
 }
 
@@ -32,9 +38,9 @@ func TestToOData(t *testing.T) {
 			want: "fields/Status eq 'Open'",
 		},
 		{
-			name: "not equals",
+			name: "text not-equals leaves the fetch unnarrowed",
 			pred: cmp("Status", "!=", vstr("Open")),
-			want: "fields/Status ne 'Open'",
+			want: "",
 		},
 		{
 			name: "less than",
@@ -120,17 +126,17 @@ func TestToOData(t *testing.T) {
 			want: "(fields/Status eq 'Open' or fields/Status eq 'Review')",
 		},
 		{
-			name: "not",
+			name: "not leaves the fetch unnarrowed",
 			pred: not(cmp("Archived", "=", vbool(true))),
-			want: "not (fields/Archived eq true)",
+			want: "",
 		},
 		{
-			name: "combined with precedence parens",
+			name: "and keeps the narrowing side of a not",
 			pred: and(
 				or(cmp("Status", "=", vstr("Open")), cmp("Status", "=", vstr("Review"))),
 				not(cmp("Archived", "=", vbool(true))),
 			),
-			want: "((fields/Status eq 'Open' or fields/Status eq 'Review') and not (fields/Archived eq true))",
+			want: "(fields/Status eq 'Open' or fields/Status eq 'Review')",
 		},
 		{
 			name: "and binds tighter than or per parser",
@@ -148,19 +154,19 @@ func TestToOData(t *testing.T) {
 			want: "startswith(fields/Title, 'Fix')",
 		},
 		{
-			name: "like suffix translates to endswith",
+			name: "like suffix is evaluated after the fetch",
 			pred: like("Title", "%bug", false),
-			want: "endswith(fields/Title, 'bug')",
+			want: "",
 		},
 		{
-			name: "like contains translates to contains",
+			name: "like contains is evaluated after the fetch",
 			pred: like("Title", "%auth%", false),
-			want: "contains(fields/Title, 'auth')",
+			want: "",
 		},
 		{
-			name: "not like wraps with not",
+			name: "not like is evaluated after the fetch",
 			pred: like("Title", "%spam%", true),
-			want: "not (contains(fields/Title, 'spam'))",
+			want: "",
 		},
 		{
 			name: "like escapes single quotes in literal",
@@ -168,46 +174,46 @@ func TestToOData(t *testing.T) {
 			want: "startswith(fields/Title, 'O''Brien')",
 		},
 		{
-			name:    "like rejects mid-pattern percent",
-			pred:    like("Title", "foo%bar", false),
-			wantErr: "mid-pattern",
+			name: "like mid-pattern percent is evaluated after the fetch",
+			pred: like("Title", "foo%bar", false),
+			want: "",
 		},
 		{
-			name:    "like rejects underscore wildcard",
-			pred:    like("Title", "a_b", false),
-			wantErr: "_",
+			name: "like underscore wildcard is evaluated after the fetch",
+			pred: like("Title", "a_b", false),
+			want: "",
 		},
 		{
-			name:    "like on number column",
-			pred:    like("Priority", "1%", false),
-			wantErr: "text columns",
+			name: "like on a number column is left to the evaluator",
+			pred: like("Priority", "1%", false),
+			want: "",
 		},
 
 		// ILIKE: wraps field in tolower() and lowercases the literal
 		{
-			name: "ilike prefix",
+			name: "ilike prefix narrows with startswith, which SharePoint matches case-insensitively",
 			pred: ilike("Title", "Fix%", false),
-			want: "startswith(tolower(fields/Title), 'fix')",
+			want: "startswith(fields/Title, 'Fix')",
 		},
 		{
-			name: "ilike suffix",
+			name: "ilike suffix is evaluated after the fetch",
 			pred: ilike("Title", "%BUG", false),
-			want: "endswith(tolower(fields/Title), 'bug')",
+			want: "",
 		},
 		{
-			name: "ilike contains",
+			name: "ilike contains is evaluated after the fetch",
 			pred: ilike("Title", "%Auth%", false),
-			want: "contains(tolower(fields/Title), 'auth')",
+			want: "",
 		},
 		{
-			name: "not ilike",
+			name: "not ilike is evaluated after the fetch",
 			pred: ilike("Title", "%SPAM%", true),
-			want: "not (contains(tolower(fields/Title), 'spam'))",
+			want: "",
 		},
 		{
-			name:    "ilike rejects underscore wildcard",
-			pred:    ilike("Title", "a_b", false),
-			wantErr: "ILIKE",
+			name: "ilike underscore wildcard is evaluated after the fetch",
+			pred: ilike("Title", "a_b", false),
+			want: "",
 		},
 
 		// IN
@@ -222,9 +228,9 @@ func TestToOData(t *testing.T) {
 			want: "(fields/Priority eq 1 or fields/Priority eq 2 or fields/Priority eq 3)",
 		},
 		{
-			name: "not in",
+			name: "not in is evaluated after the fetch",
 			pred: in("Status", []parse.Value{vstr("Archived")}, true),
-			want: "not (fields/Status eq 'Archived')",
+			want: "",
 		},
 
 		// BETWEEN
@@ -234,9 +240,9 @@ func TestToOData(t *testing.T) {
 			want: "(fields/Priority ge 1 and fields/Priority le 5)",
 		},
 		{
-			name: "not between",
+			name: "not between is evaluated after the fetch",
 			pred: between("Priority", vnum("2"), vnum("4"), true),
-			want: "not (fields/Priority ge 2 and fields/Priority le 4)",
+			want: "",
 		},
 		{
 			name: "between dates normalized",
@@ -244,16 +250,58 @@ func TestToOData(t *testing.T) {
 			want: "(fields/Modified ge '2024-01-01T00:00:00Z' and fields/Modified le '2024-12-31T00:00:00Z')",
 		},
 
-		// Negative
+		// Narrowing rules
 		{
-			name:    "unknown column in comparison",
-			pred:    cmp("DoesNotExist", "=", vstr("x")),
-			wantErr: `unknown column "DoesNotExist"`,
+			name: "number not-equals narrows",
+			pred: cmp("Priority", "!=", vnum("3")),
+			want: "fields/Priority ne 3",
 		},
 		{
-			name:    "unknown column in null test",
-			pred:    isnull("DoesNotExist", false),
-			wantErr: `unknown column "DoesNotExist"`,
+			name: "text range leaves the fetch unnarrowed",
+			pred: cmp("Title", ">", vstr("M")),
+			want: "",
+		},
+		{
+			name: "or with one side unnarrowable leaves the fetch unnarrowed",
+			pred: or(cmp("Status", "=", vstr("Open")), like("Title", "%bug", false)),
+			want: "",
+		},
+		{
+			name: "and narrows on the side it can",
+			pred: and(like("Title", "%bug", false), cmp("Priority", ">", vnum("2"))),
+			want: "fields/Priority gt 2",
+		},
+		{
+			name: "like without wildcards narrows with eq",
+			pred: like("Title", "Fix", false),
+			want: "fields/Title eq 'Fix'",
+		},
+		{
+			name: "ID is evaluated after the fetch",
+			pred: cmp("ID", "=", vnum("2")),
+			want: "",
+		},
+		{
+			name: "person column narrows through its LookupId",
+			pred: cmp("Owner", "=", vnum("11")),
+			want: "fields/OwnerLookupId eq 11",
+		},
+		{
+			name: "multi-value person column is evaluated after the fetch",
+			pred: cmp("Reviewers", "=", vnum("11")),
+			want: "",
+		},
+
+		// Negative
+		{
+			name: "unknown column in comparison is left to the evaluator",
+			pred: cmp("DoesNotExist", "=", vstr("x")),
+			want: "",
+		},
+		{
+			name: "unknown column in null test is left to the evaluator",
+			pred: isnull("DoesNotExist", false),
+			want: "",
 		},
 		{
 			name:    "datetime malformed",
@@ -261,9 +309,9 @@ func TestToOData(t *testing.T) {
 			wantErr: "ISO 8601 datetime",
 		},
 		{
-			name:    "arithmetic LHS permanently rejected with rewrite hint",
-			pred:    cmpE(&parse.BinaryExpr{Op: "+", L: &parse.ColumnExpr{Name: "Priority"}, R: &parse.LiteralExpr{Value: vnum("1")}}, "=", vnum("3")),
-			wantErr: "Rewrite by computing the literal side",
+			name: "arithmetic LHS is evaluated after the fetch",
+			pred: cmpE(&parse.BinaryExpr{Op: "+", L: &parse.ColumnExpr{Name: "Priority"}, R: &parse.LiteralExpr{Value: vnum("1")}}, "=", vnum("3")),
+			want: "",
 		},
 	}
 
@@ -300,29 +348,6 @@ func TestToODataNil(t *testing.T) {
 	}
 }
 
-// TestArithmeticWHERERejection confirms the full parse-then-translate path
-// surfaces the permanent rejection with its rewrite hint. Pass 3 slice B
-// settled this as a permanent rejection: OData $filter has no arithmetic
-// operator on field references, and falling back to a client-side full-fetch
-// would defeat the point of server-side filtering on large lists.
-func TestArithmeticWHERERejection(t *testing.T) {
-	schema := testSchema()
-	stmt, err := parse.Parse("SELECT * WHERE Priority + 1 = 5")
-	if err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	sel := stmt.(*parse.SelectStmt)
-	_, err = ToOData(sel.Where, schema)
-	if err == nil {
-		t.Fatal("expected error for arithmetic WHERE, got nil")
-	}
-	for _, want := range []string{"arithmetic", "not supported by SharePoint", "Rewrite", "Priority = 4"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q missing %q", err.Error(), want)
-		}
-	}
-}
-
 // Integration with parser: parsing then translating produces expected $filter.
 func TestParseAndTranslate(t *testing.T) {
 	schema := testSchema()
@@ -340,7 +365,7 @@ func TestParseAndTranslate(t *testing.T) {
 		},
 		{
 			input: "SELECT * WHERE Modified < '2024-01-01' AND NOT Archived = TRUE",
-			want:  "(fields/Modified lt '2024-01-01T00:00:00Z' and not (fields/Archived eq true))",
+			want:  "fields/Modified lt '2024-01-01T00:00:00Z'",
 		},
 	}
 	for _, tt := range tests {

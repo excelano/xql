@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
@@ -5,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/excelano/xql/internal/cell"
 	"github.com/excelano/xql/internal/parse"
 )
 
@@ -13,20 +17,97 @@ import (
 // because user columns live under the fields subobject on item resources.
 const ODataFieldPrefix = "fields/"
 
-// ToOData converts a parsed Predicate to a Microsoft Graph $filter expression.
+// ToOData converts a parsed Predicate to the Microsoft Graph $filter that
+// narrows the fetch for it. The filter selects a superset of the matching
+// items, never fewer, and the executor evaluates the full predicate on what
+// comes back. Two facts about SharePoint force that split: its list-item
+// filter rejects endswith, contains, tolower and not, and it compares text
+// case-insensitively, so text = and a prefix LIKE narrow safely while text
+// !=, < and > do not. Conditions on ID, on an expression, or under NOT or a
+// partial OR contribute nothing to the filter.
+//
 // Column references are verified against schema (keyed by internal name) and
 // formatted with the fields/ prefix. Values are emitted in OData v4 form:
 // single-quoted strings (with ” escape), bare numbers, lowercase booleans,
-// and bare ISO 8601 datetimes. Date-only strings on DateTime columns are
-// normalized to full RFC3339 in UTC.
-//
-// A nil predicate returns the empty string. The result is not URL-encoded;
-// pass it through url.Values when building the request.
+// and ISO 8601 datetimes normalized to RFC3339 in UTC. A predicate with
+// nothing to narrow on returns the empty string. The result is not
+// URL-encoded; pass it through url.Values when building the request.
 func ToOData(node parse.Predicate, schema map[string]FieldInfo) (string, error) {
-	if node == nil {
+	narrow := serverFilter(node, schema)
+	if narrow == nil {
 		return "", nil
 	}
-	return translate(node, schema)
+	return translate(narrow, schema)
+}
+
+// serverFilter returns the part of p that Graph can evaluate as a superset of
+// p's matches, or nil when nothing narrows the fetch.
+func serverFilter(p parse.Predicate, schema map[string]FieldInfo) parse.Predicate {
+	switch n := p.(type) {
+	case *parse.BinaryOp:
+		l, r := serverFilter(n.L, schema), serverFilter(n.R, schema)
+		if n.Op == "OR" && (l == nil || r == nil) {
+			return nil
+		}
+		switch {
+		case l == nil:
+			return r
+		case r == nil:
+			return l
+		}
+		return &parse.BinaryOp{Op: n.Op, L: l, R: r}
+	case *parse.Comparison:
+		col, ok := columnExprName(n.LExpr)
+		if ok && filterable(col, schema) && (n.Op == "=" || !isTextField(schema[col])) {
+			return n
+		}
+	case *parse.NullTest:
+		if filterable(n.Column, schema) {
+			return n
+		}
+	case *parse.LikeOp:
+		if !n.Not && filterable(n.Column, schema) && isTextField(schema[n.Column]) && narrowingPrefix(n.Pattern) {
+			return n
+		}
+	case *parse.InOp:
+		if !n.Not && filterable(n.Column, schema) {
+			return n
+		}
+	case *parse.BetweenOp:
+		if !n.Not && filterable(n.Column, schema) && !isTextField(schema[n.Column]) {
+			return n
+		}
+	}
+	return nil
+}
+
+// filterable reports whether a column can narrow the fetch. Graph cannot
+// filter on the item ID, a multi-value column reads as text the evaluator
+// matches differently, and an unknown name is left for the evaluator to
+// report.
+func filterable(col string, schema map[string]FieldInfo) bool {
+	f, ok := schema[col]
+	return ok && col != "ID" && !f.Multi
+}
+
+func isTextField(f FieldInfo) bool {
+	return f.CellType() == cell.TypeString
+}
+
+// narrowingPrefix reports whether a LIKE pattern is a literal prefix, with at
+// most one trailing %, which startswith (or eq, with no wildcard) narrows.
+func narrowingPrefix(pattern string) bool {
+	body := strings.TrimSuffix(pattern, "%")
+	return !strings.ContainsAny(body, "%_\\")
+}
+
+// fieldRef is the $filter name for a column: a person or lookup column is
+// filtered through its LookupId field.
+func fieldRef(f FieldInfo) string {
+	if f.isLookupID() {
+		return ODataFieldPrefix + f.Name + "LookupId"
+	}
+	return ODataFieldPrefix + f.Name
 }
 
 func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error) {
@@ -41,32 +122,9 @@ func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error
 			return "", err
 		}
 		return fmt.Sprintf("(%s %s %s)", l, strings.ToLower(n.Op), r), nil
-	case *parse.NotOp:
-		inner, err := translate(n.Inner, schema)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("not (%s)", inner), nil
 	case *parse.Comparison:
-		col, ok := columnExprName(n.LExpr)
-		if !ok {
-			if fc, isFn := n.LExpr.(*parse.FuncCallExpr); isFn {
-				// The rewrite that works depends on what the function was doing:
-				// a case fold has ILIKE as its server-side equivalent, a calendar
-				// component has a date range. A generic hint would be wrong for
-				// one of the two, so say the one that fits.
-				switch fc.Name {
-				case "YEAR", "MONTH", "DAY":
-					return "", fmt.Errorf("%s(...) in WHERE is not supported by SharePoint: OData $filter has no equivalent for scalar functions. Rewrite as a date range (e.g. WHERE YEAR(Modified) = 2024 → WHERE Modified BETWEEN '2024-01-01' AND '2024-12-31'). %s() still works in SELECT and GROUP BY, which run after the fetch", fc.Name, fc.Name)
-				}
-				return "", fmt.Errorf("%s(...) in WHERE is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly (e.g. WHERE %s(app_name) = 'x' → WHERE app_name ILIKE 'x')", fc.Name, fc.Name)
-			}
-			return "", fmt.Errorf("arithmetic on a column reference in WHERE is not supported by SharePoint: OData $filter has no equivalent operator. Rewrite by computing the literal side yourself (e.g. WHERE Priority + 1 = 5 → WHERE Priority = 4)")
-		}
-		field, ok := schema[col]
-		if !ok {
-			return "", fmt.Errorf("unknown column %q", col)
-		}
+		col, _ := columnExprName(n.LExpr)
+		field := schema[col]
 		op, ok := odataCmpOps[n.Op]
 		if !ok {
 			return "", fmt.Errorf("internal: unsupported operator %q", n.Op)
@@ -75,18 +133,19 @@ func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s%s %s %s", ODataFieldPrefix, col, op, val), nil
+		return fmt.Sprintf("%s %s %s", fieldRef(field), op, val), nil
 	case *parse.NullTest:
-		if _, ok := schema[n.Column]; !ok {
-			return "", fmt.Errorf("unknown column %q", n.Column)
-		}
 		op := "eq"
 		if n.Not {
 			op = "ne"
 		}
-		return fmt.Sprintf("%s%s %s null", ODataFieldPrefix, n.Column, op), nil
+		return fmt.Sprintf("%s %s null", fieldRef(schema[n.Column]), op), nil
 	case *parse.LikeOp:
-		return translateLike(n, schema)
+		lit := strings.TrimSuffix(n.Pattern, "%")
+		if lit == n.Pattern {
+			return fmt.Sprintf("%s eq '%s'", fieldRef(schema[n.Column]), escapeODataString(lit)), nil
+		}
+		return fmt.Sprintf("startswith(%s, '%s')", fieldRef(schema[n.Column]), escapeODataString(lit)), nil
 	case *parse.InOp:
 		return translateIn(n, schema)
 	case *parse.BetweenOp:
@@ -95,87 +154,10 @@ func translate(node parse.Predicate, schema map[string]FieldInfo) (string, error
 	return "", fmt.Errorf("internal: unhandled predicate type %T", node)
 }
 
-// translateLike maps a SQL LIKE (case-sensitive) or ILIKE (case-insensitive)
-// pattern to one of OData's string functions. SharePoint $filter supports
-// startswith, endswith, and contains; arbitrary LIKE patterns can't be
-// expressed, so we accept only the three pattern shapes that have a clean
-// equivalent: prefix (foo%), suffix (%foo), and substring (%foo%).
-// Single-character wildcards (_) and mid-pattern % are rejected with a
-// clear error.
-//
-// ILIKE wraps the field in tolower(...) and lowercases the literal before
-// emission. Microsoft Graph supports tolower() in $filter expressions.
-func translateLike(n *parse.LikeOp, schema map[string]FieldInfo) (string, error) {
-	field, ok := schema[n.Column]
-	if !ok {
-		return "", fmt.Errorf("unknown column %q", n.Column)
-	}
-	op := "LIKE"
-	if n.Insensitive {
-		op = "ILIKE"
-	}
-	if field.Type != FieldText && field.Type != FieldNote && field.Type != FieldChoice {
-		return "", fmt.Errorf("%s only works on text columns; %q is %s", op, n.Column, field.Type)
-	}
-	fn, lit, err := splitLikePattern(n.Pattern)
-	if err != nil {
-		return "", fmt.Errorf("%s on %q: %w", op, n.Column, err)
-	}
-	fieldRef := ODataFieldPrefix + n.Column
-	if n.Insensitive {
-		fieldRef = "tolower(" + fieldRef + ")"
-		lit = strings.ToLower(lit)
-	}
-	expr := fmt.Sprintf("%s(%s, '%s')", fn, fieldRef, escapeODataString(lit))
-	if n.Not {
-		return "not (" + expr + ")", nil
-	}
-	return expr, nil
-}
-
-// splitLikePattern returns the OData function name (startswith / endswith /
-// contains) and the literal substring to match. It rejects patterns that
-// can't be translated cleanly: an underscore wildcard, a backslash escape,
-// or a % anywhere other than the leading/trailing edge.
-func splitLikePattern(pattern string) (string, string, error) {
-	if strings.ContainsRune(pattern, '_') {
-		return "", "", fmt.Errorf("single-character wildcard '_' is not supported against SharePoint; rephrase the query")
-	}
-	if strings.Contains(pattern, "\\") {
-		return "", "", fmt.Errorf("backslash escapes in LIKE patterns are not supported against SharePoint")
-	}
-	prefix := strings.HasPrefix(pattern, "%")
-	suffix := strings.HasSuffix(pattern, "%")
-	body := pattern
-	if prefix {
-		body = body[1:]
-	}
-	if suffix && len(body) > 0 {
-		body = body[:len(body)-1]
-	}
-	if strings.ContainsRune(body, '%') {
-		return "", "", fmt.Errorf("mid-pattern '%%' is not supported against SharePoint; only prefix, suffix, and contains shapes translate")
-	}
-	switch {
-	case prefix && suffix:
-		return "contains", body, nil
-	case suffix:
-		return "startswith", body, nil
-	case prefix:
-		return "endswith", body, nil
-	}
-	// No wildcards at all: equivalent to equality on a string column.
-	return "contains", body, nil
-}
-
-// translateIn fans an IN list out to (col eq v1 or col eq v2 or ...). Microsoft
-// Graph technically supports OData v4 `in` but it has had bugs and uneven
-// rollout; the OR form is universally supported and produces the same plan.
+// translateIn fans an IN list out to (col eq v1 or col eq v2 or ...), since
+// SharePoint's list-item filter rejects the OData v4 `in` operator.
 func translateIn(n *parse.InOp, schema map[string]FieldInfo) (string, error) {
-	field, ok := schema[n.Column]
-	if !ok {
-		return "", fmt.Errorf("unknown column %q", n.Column)
-	}
+	field := schema[n.Column]
 	parts := make([]string, 0, len(n.Values))
 	for _, v := range n.Values {
 		if v.Kind == parse.ValNull {
@@ -185,24 +167,15 @@ func translateIn(n *parse.InOp, schema map[string]FieldInfo) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		op := "eq"
-		parts = append(parts, fmt.Sprintf("%s%s %s %s", ODataFieldPrefix, n.Column, op, s))
+		parts = append(parts, fmt.Sprintf("%s eq %s", fieldRef(field), s))
 	}
-	joiner := " or "
-	expr := "(" + strings.Join(parts, joiner) + ")"
-	if n.Not {
-		return "not " + expr, nil
-	}
-	return expr, nil
+	return "(" + strings.Join(parts, " or ") + ")", nil
 }
 
 // translateBetween emits the inclusive form `(col ge low and col le high)`.
-// OData has no native BETWEEN but ge/le compose exactly the same way.
+// OData has no native BETWEEN but ge/le compose the same way.
 func translateBetween(n *parse.BetweenOp, schema map[string]FieldInfo) (string, error) {
-	field, ok := schema[n.Column]
-	if !ok {
-		return "", fmt.Errorf("unknown column %q", n.Column)
-	}
+	field := schema[n.Column]
 	lo, err := formatValue(n.Low, field)
 	if err != nil {
 		return "", err
@@ -211,11 +184,8 @@ func translateBetween(n *parse.BetweenOp, schema map[string]FieldInfo) (string, 
 	if err != nil {
 		return "", err
 	}
-	expr := fmt.Sprintf("(%s%s ge %s and %s%s le %s)", ODataFieldPrefix, n.Column, lo, ODataFieldPrefix, n.Column, hi)
-	if n.Not {
-		return "not " + expr, nil
-	}
-	return expr, nil
+	ref := fieldRef(field)
+	return fmt.Sprintf("(%s ge %s and %s le %s)", ref, lo, ref, hi), nil
 }
 
 var odataCmpOps = map[string]string{

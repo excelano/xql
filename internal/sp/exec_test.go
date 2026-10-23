@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
@@ -2062,21 +2065,5 @@ func TestValidateGroupByRejectsDuplicateExpression(t *testing.T) {
 	_, err := validateGroupBy(exprs, schema)
 	if err == nil || !strings.Contains(err.Error(), "duplicate expression") {
 		t.Fatalf("got %v, want duplicate-expression error", err)
-	}
-}
-
-func TestODataFilterRejectsScalarFunctionInWhere(t *testing.T) {
-	// Scoped rejection: the SP OData translator can't emit LOWER(x) in
-	// $filter, so a WHERE-side scalar function should fail with an
-	// SP-permanent-rejection-style message rather than falling through.
-	pred := &parse.Comparison{
-		LExpr: &parse.FuncCallExpr{Name: "LOWER", Args: []parse.Expr{&parse.ColumnExpr{Name: "app_name"}}},
-		Op:    "=",
-		Value: parse.Value{Kind: parse.ValString, Str: "x"},
-	}
-	schema := map[string]FieldInfo{"app_name": {Name: "app_name", Type: FieldText}}
-	_, err := ToOData(pred, schema)
-	if err == nil || !strings.Contains(err.Error(), "not supported by SharePoint") || !strings.Contains(err.Error(), "LOWER") {
-		t.Fatalf("got %v, want SP-rejection error naming LOWER", err)
 	}
 }

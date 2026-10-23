@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
@@ -10,7 +13,7 @@ import (
 	"github.com/excelano/xql/internal/parse"
 )
 
-func TestFieldTypeToCellType(t *testing.T) {
+func TestCellType(t *testing.T) {
 	cases := []struct {
 		in   FieldType
 		want cell.ColumnType
@@ -21,16 +24,19 @@ func TestFieldTypeToCellType(t *testing.T) {
 		{FieldNumber, cell.TypeFloat},
 		{FieldBoolean, cell.TypeBool},
 		{FieldDateTime, cell.TypeDate},
-		{FieldPerson, cell.TypeString},
-		{FieldLookup, cell.TypeString},
+		{FieldPerson, cell.TypeFloat},
+		{FieldLookup, cell.TypeFloat},
 		{FieldHyperlink, cell.TypeString},
 		{FieldCalculated, cell.TypeString},
 		{FieldUnknown, cell.TypeString},
 	}
 	for _, tc := range cases {
-		if got := FieldTypeToCellType(tc.in); got != tc.want {
-			t.Errorf("FieldTypeToCellType(%s) = %s, want %s", tc.in, got, tc.want)
+		if got := (FieldInfo{Type: tc.in}).CellType(); got != tc.want {
+			t.Errorf("CellType(%s) = %s, want %s", tc.in, got, tc.want)
 		}
+	}
+	if got := (FieldInfo{Type: FieldPerson, Multi: true}).CellType(); got != cell.TypeString {
+		t.Errorf("CellType(multi-value person) = %s, want string", got)
 	}
 }
 
@@ -162,11 +168,11 @@ func TestFieldsToRowTypeMismatch(t *testing.T) {
 func TestFieldsToRowObjectFieldStringified(t *testing.T) {
 	bound := &BoundList{
 		Columns: []string{"Owner"},
-		Schema:  map[string]FieldInfo{"Owner": {Name: "Owner", Type: FieldPerson}},
+		Schema:  map[string]FieldInfo{"Owner": {Name: "Owner", Type: FieldPerson, Multi: true}},
 	}
 	cols, info := BuildCellSchema(bound)
 	row, err := FieldsToRow(map[string]any{
-		"Owner": map[string]any{"displayName": "David", "email": "d@x"},
+		"Owner": []any{map[string]any{"LookupValue": "David", "Email": "d@x"}},
 	}, cols, info)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

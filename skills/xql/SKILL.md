@@ -93,7 +93,7 @@ A committed write rewrites the bound CSV, or PATCHes each affected SharePoint it
 | `--type Col=int,Other=string` | Override type inference. |
 | `--output PATH` | Write the result, or the committed table, to PATH as CSV. |
 
-`xql sp <list-url>` takes the same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header` and `--output`, plus `--all-fields` to include hidden and system columns in `SELECT *` and `--describe`.
+`xql sp <list-url>` takes the same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header` and `--output`, plus `--all-fields` to include SharePoint's system columns in `SELECT *` and `--describe`.
 
 `xql xinglet xinglet://<uuid>` takes `--exec`, `--describe`, `--mode`, `--json`, `--no-output-header` and `--output`, and reads its token from `XINGLET_TOKEN`.
 
@@ -105,11 +105,13 @@ The type does not change what is written. A committed write rewrites only the ro
 
 ## SharePoint specifics
 
-`WHERE` translates to OData `$filter` and runs server-side; `ORDER BY`, `LIMIT`, `OFFSET` and `DISTINCT` apply client-side to the filtered set. `LIKE` maps to `startswith`, `endswith` or `contains` by where the `%` sits, and a mid-pattern `%`, a `_` wildcard or an escape is rejected because OData has no equivalent. `ILIKE` lowercases both sides with `tolower()`. `IN` becomes an OR'd equality chain and `BETWEEN` a `ge`/`le` pair.
+The whole grammar works in `WHERE`, with the same case-sensitive `=` and `LIKE` as on a CSV file. Graph narrows the fetch where SharePoint can (comparisons, text `=`, a prefix `LIKE`) and xql evaluates the rest, so a `WHERE` made only of conditions SharePoint cannot answer, such as `Title LIKE '%x%'` or `ID = 5`, reads the whole list. On a large list, add a narrowing condition when you have one.
+
+`ID` is the item number. Person and lookup columns read as the numeric ID they point at (`WHERE Author = 11`).
 
 Every column has an internal name (what Graph uses, often `field_5`) and a display name (what the SharePoint UI shows), and either resolves. `describe` prints both when they differ, and two columns sharing a display name raise an ambiguous-column error that lists the internal names.
 
-Writes validate against the list schema before any Graph call. Person, Lookup, Hyperlink and Calculated columns are rejected on write. A Lookup field reads as its numeric ID, and that ID is what to write.
+Writes validate against the list schema before any Graph call. Person, Lookup, Hyperlink and Calculated columns are rejected on write.
 
 Sign-in is device-code OAuth, with the token cached in `~/.config/excelano/sp-token.json`, shared with the xfiles tools. `xql auth --json` reports `signed_in`, `account`, `tenant`, `token_expires` and `scopes` without starting a sign-in and exits 0 either way. Run it before a batch of `xql sp` calls on a machine you are unsure of, and branch on `signed_in`. If it is false, ask the user to run `xql sp <list-url>` once from their own terminal.
 
@@ -158,8 +160,6 @@ xql sp https://contoso.sharepoint.com/sites/team/Lists/Big \
 
 - `unknown function FOO` is a mistyped scalar or a capability that lives in a sibling tool, and the message names which: text rewriting routes to xled, reshaping to xshape, and xql's missing functions name the xled command that computes the column. A bare "unknown function" with no pointer is a typo.
 - `ambiguous column: X (internal names: ...)` means two SharePoint columns share a display name. Use the internal name.
-- `... is not supported by SharePoint: OData $filter has no equivalent ...` comes from a scalar function in `WHERE` against `sp`. Write `WHERE col ILIKE 'x'` instead of `WHERE LOWER(col) = 'x'`.
-- `LIKE pattern has no OData equivalent` is a mid-pattern `%` or `_` against `sp`. Reshape the pattern, or fetch the column and filter afterwards.
 - `no cached token, and no terminal is attached to complete device-code sign-in` means sign-in needs a human. Ask the user to run `xql sp <list-url>` once from their own terminal, then rerun. Do not retry or script the browser flow.
 
 ## Not this skill's job

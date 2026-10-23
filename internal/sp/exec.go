@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
@@ -139,46 +142,25 @@ func (e *Executor) executeSelect(ctx context.Context, sel *parse.SelectStmt) err
 		}
 	}
 
-	q := url.Values{
-		"$expand": {"fields"},
-	}
-	if sel.Where != nil {
-		filter, err := ToOData(sel.Where, e.Bound.Schema)
-		if err != nil {
-			return err
-		}
-		q.Set("$filter", filter)
-	}
-
-	path := fmt.Sprintf("/sites/%s/lists/%s/items", e.Bound.SiteID, e.Bound.ListID)
-	raws, err := e.Graph.GetAll(ctx, path, q)
+	items, err := e.fetchTargets(ctx, sel.Where)
 	if err != nil {
 		return err
 	}
 
-	rows := make([]map[string]any, 0, len(raws))
+	rows := make([]map[string]any, 0, len(items))
 	var seen map[string]struct{}
 	if sel.Distinct {
-		seen = make(map[string]struct{}, len(raws))
+		seen = make(map[string]struct{}, len(items))
 	}
-	for _, raw := range raws {
-		var item struct {
-			Fields map[string]any `json:"fields"`
-		}
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return fmt.Errorf("decoding list item: %w", err)
-		}
-		if item.Fields == nil {
-			item.Fields = map[string]any{}
-		}
+	for _, it := range items {
 		if sel.Distinct {
-			key := distinctKey(item.Fields, sourceCols)
+			key := distinctKey(it.Fields, sourceCols)
 			if _, dup := seen[key]; dup {
 				continue
 			}
 			seen[key] = struct{}{}
 		}
-		rows = append(rows, item.Fields)
+		rows = append(rows, it.Fields)
 	}
 
 	if len(sel.OrderBy) > 0 {
@@ -403,7 +385,7 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error)
 				Source: name,
 				Label:  name,
 				Expr:   &parse.ColumnExpr{Name: name},
-				Type:   FieldTypeToCellType(info.Type),
+				Type:   info.CellType(),
 			})
 		}
 		return out, nil
@@ -439,7 +421,7 @@ func (e *Executor) resolveProjection(sel *parse.SelectStmt) ([]projEntry, error)
 				Source: name,
 				Label:  label,
 				Expr:   pr.Expr,
-				Type:   FieldTypeToCellType(info.Type),
+				Type:   info.CellType(),
 			})
 			continue
 		}
@@ -1236,7 +1218,16 @@ type listItem struct {
 
 // fetchTargets runs the equivalent of SELECT * WHERE <pred> and returns the
 // matched items as listItem records. nil WHERE returns every row in the list.
+// Graph narrows the fetch with what ToOData can express, and the full
+// predicate is then evaluated here, so SharePoint's case-insensitive text
+// matching never decides a result.
 func (e *Executor) fetchTargets(ctx context.Context, where parse.Predicate) ([]listItem, error) {
+	if where != nil {
+		_, info := BuildCellSchema(e.Bound)
+		if err := eval.ValidatePredicate(where, info); err != nil {
+			return nil, err
+		}
+	}
 	q := url.Values{"$expand": {"fields"}}
 	if where != nil {
 		filter, err := ToOData(where, e.Bound.Schema)
@@ -1262,9 +1253,32 @@ func (e *Executor) fetchTargets(ctx context.Context, where parse.Predicate) ([]l
 		if it.Fields == nil {
 			it.Fields = map[string]any{}
 		}
+		normalizeFields(it.Fields, e.Bound.Schema)
 		items = append(items, listItem{ID: it.ID, Fields: it.Fields})
 	}
-	return items, nil
+	if where == nil {
+		return items, nil
+	}
+	return e.filterItems(items, where)
+}
+
+func (e *Executor) filterItems(items []listItem, where parse.Predicate) ([]listItem, error) {
+	table, err := BuildCellTable(e.Bound, items)
+	if err != nil {
+		return nil, err
+	}
+	ctx := eval.NewEvalContext(table)
+	kept := items[:0]
+	for i, it := range items {
+		ok, err := eval.Matches(where, table.Rows[i], ctx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			kept = append(kept, it)
+		}
+	}
+	return kept, nil
 }
 
 // validateAssignments enforces v1 write rules on each assignment before
@@ -1433,7 +1447,7 @@ func evalCellToFieldJSON(c eval.EvalCell, target FieldType) (any, error) {
 func buildCellSchemaFromFieldInfo(schema map[string]FieldInfo) map[string]cell.ColumnInfo {
 	out := make(map[string]cell.ColumnInfo, len(schema))
 	for name, fi := range schema {
-		out[name] = cell.ColumnInfo{Name: name, Type: FieldTypeToCellType(fi.Type)}
+		out[name] = cell.ColumnInfo{Name: name, Type: fi.CellType()}
 	}
 	return out
 }

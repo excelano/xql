@@ -1,21 +1,29 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package sp
 
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/excelano/xql/internal/cell"
 )
 
-// FieldTypeToCellType maps a SharePoint FieldType to the cell.ColumnType used
-// by the shared evaluator. Number is mapped to TypeFloat (not TypeInt)
-// because Graph returns JSON numbers and json.Unmarshal into any always
-// produces float64; even integer-valued list-item numbers arrive as floats.
-// Object-shaped types (person, lookup, hyperlink) and the read-only
+// CellType maps a SharePoint column to the cell.ColumnType used by the
+// shared evaluator. Number is mapped to TypeFloat (not TypeInt) because Graph
+// returns JSON numbers and json.Unmarshal into any always produces float64;
+// even integer-valued list-item numbers arrive as floats. A single-value
+// person or lookup column reads as its numeric LookupId (normalizeFields).
+// Multi-value person and lookup columns, hyperlink, and the read-only
 // calculated/unknown types fall back to TypeString — they round-trip as
 // rendered text for read paths but cannot be written.
-func FieldTypeToCellType(t FieldType) cell.ColumnType {
-	switch t {
+func (f FieldInfo) CellType() cell.ColumnType {
+	if f.isLookupID() {
+		return cell.TypeFloat
+	}
+	switch f.Type {
 	case FieldNumber:
 		return cell.TypeFloat
 	case FieldBoolean:
@@ -36,7 +44,7 @@ func BuildCellSchema(bound *BoundList) ([]string, map[string]cell.ColumnInfo) {
 	info := make(map[string]cell.ColumnInfo, len(cols))
 	for _, name := range cols {
 		fi := bound.Schema[name]
-		info[name] = cell.ColumnInfo{Name: name, Type: FieldTypeToCellType(fi.Type)}
+		info[name] = cell.ColumnInfo{Name: name, Type: fi.CellType()}
 	}
 	return cols, info
 }
@@ -103,6 +111,16 @@ func convertField(raw any, t cell.ColumnType) (cell.Cell, error) {
 		}
 		return cell.Cell{Bool: b}, nil
 	case cell.TypeFloat:
+		// Lookup-typed system columns such as ItemChildCount carry their
+		// number as a string, empty when there is none.
+		if str, ok := raw.(string); ok {
+			if str == "" {
+				return cell.Cell{Null: true}, nil
+			}
+			if f, err := strconv.ParseFloat(str, 64); err == nil {
+				return cell.Cell{Float: f}, nil
+			}
+		}
 		f, ok := toFloat64(raw)
 		if !ok {
 			return cell.Cell{}, fmt.Errorf("expected number, got %T", raw)

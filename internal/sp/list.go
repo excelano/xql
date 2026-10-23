@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 // Package sp is the SharePoint backend for xql: list binding (site + list
 // resolution + column schema), OData translation, and the read/write executor.
 // Sign-in and the Graph HTTP client come from github.com/excelano/spauth, the
@@ -9,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/excelano/spauth"
@@ -44,6 +48,7 @@ type FieldInfo struct {
 	Hidden      bool
 	ReadOnly    bool
 	Required    bool
+	Multi       bool
 }
 
 // BoundList is the resolved single list this REPL session operates on.
@@ -229,9 +234,10 @@ func fetchColumns(ctx context.Context, graph *spauth.GraphClient, siteID, listID
 			Name:        c.Name,
 			DisplayName: c.DisplayName,
 			Type:        detectFieldType(&c),
-			Hidden:      c.Hidden,
+			Hidden:      c.Hidden || isSystemColumn(&c),
 			ReadOnly:    c.ReadOnly,
 			Required:    c.Required,
+			Multi:       allowsMultipleValues(&c),
 		}
 	}
 	return order, schema, nil
@@ -241,6 +247,7 @@ type columnJSON struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
+	ColumnGroup string `json:"columnGroup"`
 	Hidden      bool   `json:"hidden"`
 	ReadOnly    bool   `json:"readOnly"`
 	Required    bool   `json:"required"`
@@ -258,7 +265,49 @@ type columnJSON struct {
 	Calculated         *json.RawMessage `json:"calculated,omitempty"`
 }
 
+// allowsMultipleValues reports whether a person or lookup column holds a
+// list of values rather than one.
+func allowsMultipleValues(c *columnJSON) bool {
+	for _, facet := range []*json.RawMessage{c.PersonOrGroup, c.Lookup} {
+		if facet == nil {
+			continue
+		}
+		var f struct {
+			AllowMultipleValues bool `json:"allowMultipleValues"`
+		}
+		if json.Unmarshal(*facet, &f) == nil && f.AllowMultipleValues {
+			return true
+		}
+	}
+	return false
+}
+
+// shownSystemColumns are the read-only system columns SELECT * keeps, being
+// the ones a person asks about: the item number, its timestamps and who
+// created and last changed it.
+var shownSystemColumns = map[string]bool{
+	"ID": true, "Created": true, "Modified": true, "Author": true, "Editor": true,
+}
+
+// isSystemColumn reports whether a column is SharePoint plumbing that the
+// list UI keeps out of its default view. Graph marks almost none of these
+// hidden, so read-only is the signal: a user cannot create a read-only
+// column other than a calculated one. Attachments and the _Hidden group are
+// writable-looking plumbing.
+func isSystemColumn(c *columnJSON) bool {
+	if shownSystemColumns[c.Name] {
+		return false
+	}
+	if c.ColumnGroup == "_Hidden" || c.Name == "Attachments" {
+		return true
+	}
+	return c.ReadOnly && c.Calculated == nil
+}
+
 func detectFieldType(c *columnJSON) FieldType {
+	if c.Name == "ID" {
+		return FieldNumber
+	}
 	switch {
 	case c.Text != nil:
 		if c.Text.AllowMultipleLines {
@@ -284,6 +333,44 @@ func detectFieldType(c *columnJSON) FieldType {
 	default:
 		return FieldUnknown
 	}
+}
+
+// normalizeFields fills in the values Graph returns under a different key
+// than the column name: the item number arrives as "id", and a single-value
+// person or lookup column as "<Name>LookupId", both as strings. Each is stored under
+// its column name as a number, so it reads, sorts and compares like one.
+func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
+	if _, ok := fields["ID"]; !ok {
+		if n, ok := numericString(fields["id"]); ok {
+			fields["ID"] = n
+		}
+	}
+	for name, info := range schema {
+		if !info.isLookupID() {
+			continue
+		}
+		if _, ok := fields[name]; ok {
+			continue
+		}
+		if n, ok := numericString(fields[name+"LookupId"]); ok {
+			fields[name] = n
+		}
+	}
+}
+
+// isLookupID reports whether a column reads and filters as the numeric ID of
+// the one item or person it points at.
+func (f FieldInfo) isLookupID() bool {
+	return (f.Type == FieldPerson || f.Type == FieldLookup) && !f.Multi
+}
+
+func numericString(v any) (float64, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(s, 64)
+	return n, err == nil
 }
 
 // escapeODataString doubles single quotes per OData literal-string rules.

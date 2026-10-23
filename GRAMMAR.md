@@ -173,15 +173,11 @@ Empty CSV cells are treated as `NULL` for the purposes of `IS NULL` and `IS NOT 
 
 Identifiers can reference a column by either its **display name** (what the SharePoint UI shows) or its **internal name** (what Graph `$filter` expressions and PATCH bodies actually use). Most user-added columns have an internal name like `field_5` and a display name set from the column header — so `select vendor` and `select field_5` resolve to the same column. Internal names take precedence: if a column's internal name matches what you typed, that one wins even if some other column shares the display name. Two columns sharing the same display name surface as an ambiguous-column error listing the internal names so you can pick.
 
-String literals are coerced to the destination field's SharePoint type at execution time. DateTime fields parse ISO 8601 strings. Lookup fields accept the lookup item ID as a number, not the display text. Choice fields accept the option string verbatim. Person, Hyperlink, and Calculated columns are rejected on write at validation time, before any Graph round-trip.
+String literals are coerced to the destination field's SharePoint type at execution time. DateTime fields parse ISO 8601 strings. Choice fields accept the option string verbatim. Person, Lookup, Hyperlink, and Calculated columns are rejected on write at validation time, before any Graph round-trip.
 
-An empty field reads as `NULL`. `IS NULL` and `IS NOT NULL` translate to OData `eq null` / `ne null`.
+An empty field reads as `NULL`. `ID` reads as the item's number. A person or single-value lookup column reads, compares, and sorts as the numeric ID of the person or item it points at; a multi-value one reads as text.
 
-`WHERE` predicates translate to OData `$filter` and run server-side, so even large lists return quickly. `ORDER BY`, `LIMIT`, `OFFSET`, and `DISTINCT` apply client-side after the filtered fetch.
-
-`LIKE` and `ILIKE` are restricted to the three patterns OData can run server-side: prefix (`'foo%'` → `startswith`), suffix (`'%foo'` → `endswith`), and contains (`'%foo%'` → `contains`). Single-character wildcards, mid-pattern `%`, and backslash escapes have no clean OData equivalent and produce a clear error rather than silently working incorrectly. `ILIKE` wraps the column reference in OData's `tolower()` and lowercases the literal before emission.
-
-`IN` translates to an OR'd equality chain (`col eq v1 or col eq v2 or ...`); `BETWEEN` translates to `col ge low and col le high`.
+`WHERE` means what it means on the other backends, including case-sensitive `=` and `LIKE`, although SharePoint itself compares text case-insensitively. Graph narrows the fetch with the conditions SharePoint can answer as a superset of the result: comparisons on number, date, boolean, person and lookup columns, text `=` and `IN`, a prefix `LIKE`, and null tests. xql then evaluates the full predicate on what comes back. Every other condition (a suffix or contains `LIKE`, `ILIKE`, `NOT`, a text range, a scalar function or arithmetic, and anything on `ID`) is evaluated after the fetch alone, so a `WHERE` with nothing Graph can narrow on reads the whole list. `ORDER BY`, `LIMIT`, `OFFSET`, and `DISTINCT` apply after the fetch.
 
 `UPDATE SET col = expr` with a right-hand side that references other columns requires a per-row read-evaluate-PATCH round trip against Graph. Pure-literal assignments (`SET Status = 'Done'`) run as a single PATCH per matched row.
 
