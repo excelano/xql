@@ -34,7 +34,7 @@ func (f FieldInfo) CellType() cell.ColumnType {
 		return cell.TypeFloat
 	case FieldBoolean:
 		return cell.TypeBool
-	case FieldDateTime:
+	case FieldDateTime, FieldDate:
 		return cell.TypeDate
 	default:
 		return cell.TypeString

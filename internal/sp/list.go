@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/excelano/graphauth"
 )
@@ -30,6 +31,7 @@ const (
 	FieldNumber     FieldType = "number"
 	FieldBoolean    FieldType = "boolean"
 	FieldDateTime   FieldType = "dateTime"
+	FieldDate       FieldType = "date"
 	FieldChoice     FieldType = "choice"
 	FieldPerson     FieldType = "person"
 	FieldLookup     FieldType = "lookup"
@@ -262,8 +264,10 @@ type columnJSON struct {
 	} `json:"text,omitempty"`
 	Number   *json.RawMessage `json:"number,omitempty"`
 	Boolean  *json.RawMessage `json:"boolean,omitempty"`
-	DateTime *json.RawMessage `json:"dateTime,omitempty"`
-	Choice   *struct {
+	DateTime *struct {
+		Format string `json:"format"`
+	} `json:"dateTime,omitempty"`
+	Choice *struct {
 		AllowTextEntry bool     `json:"allowTextEntry"`
 		Choices        []string `json:"choices"`
 	} `json:"choice,omitempty"`
@@ -355,6 +359,9 @@ func detectFieldType(c *columnJSON) FieldType {
 	case c.Boolean != nil:
 		return FieldBoolean
 	case c.DateTime != nil:
+		if c.DateTime.Format == "dateOnly" {
+			return FieldDate
+		}
 		return FieldDateTime
 	case c.Choice != nil:
 		return FieldChoice
@@ -375,7 +382,8 @@ func detectFieldType(c *columnJSON) FieldType {
 // than the column name: the item number arrives as "id", and a single-value
 // person or lookup column as "<Name>LookupId", both as strings. Each is
 // stored under its column name as a number, so it reads, sorts and compares
-// like one. A multi-value column becomes the text SharePoint displays.
+// like one. A date-only column becomes its date, and a multi-value column
+// the text SharePoint displays.
 func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
 	if _, ok := fields["ID"]; !ok {
 		if n, ok := numericString(fields["id"]); ok {
@@ -384,6 +392,10 @@ func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
 	}
 	for name, info := range schema {
 		switch {
+		case info.Type == FieldDate:
+			if v, ok := fields[name].(string); ok {
+				fields[name] = siteDate(v)
+			}
 		case info.isLookupID():
 			if _, ok := fields[name]; ok {
 				continue
@@ -397,6 +409,19 @@ func normalizeFields(fields map[string]any, schema map[string]FieldInfo) {
 			}
 		}
 	}
+}
+
+// siteDate recovers the calendar date of a date-only column. SharePoint
+// stores one as midnight in the site's time zone and Graph returns that
+// instant in UTC, between 10:00 the day before (UTC+14) and 12:00 the same
+// day (UTC-12); Graph does not report the zone, but adding 12 hours lands on
+// the right UTC date for every zone from UTC-11 to UTC+12.
+func siteDate(v string) string {
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return v
+	}
+	return t.Add(12 * time.Hour).UTC().Format("2006-01-02")
 }
 
 // joinLookupValues renders a multi-value person or lookup column the way

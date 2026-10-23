@@ -98,3 +98,17 @@ func TestColumnFacets(t *testing.T) {
 		t.Errorf("number calculated column reads as %s, want float", total.CellType())
 	}
 }
+
+func TestSiteDate(t *testing.T) {
+	for in, want := range map[string]string{
+		"2026-11-01T07:00:00Z": "2026-11-01", // Pacific midnight
+		"2026-11-01T05:00:00Z": "2026-11-01", // Central midnight
+		"2026-10-31T23:00:00Z": "2026-11-01", // Central European midnight
+		"2026-10-31T13:00:00Z": "2026-11-01", // New Zealand midnight
+		"not a date":           "not a date",
+	} {
+		if got := siteDate(in); got != want {
+			t.Errorf("siteDate(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

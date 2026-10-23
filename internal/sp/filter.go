@@ -200,6 +200,15 @@ var odataCmpOps = map[string]string{
 func formatValue(v parse.Value, field FieldInfo) (string, error) {
 	switch v.Kind {
 	case parse.ValString:
+		if field.Type == FieldDate {
+			// A bare date filters in the site's time zone, where the
+			// column's midnight is.
+			d, err := normalizeDate(v.Str)
+			if err != nil {
+				return "", fmt.Errorf("column %s expects an ISO 8601 date, got %q", field.Name, v.Str)
+			}
+			return "'" + d + "'", nil
+		}
 		if field.Type == FieldDateTime {
 			normalized, err := normalizeDateTime(v.Str)
 			if err != nil {
@@ -223,6 +232,17 @@ func formatValue(v parse.Value, field FieldInfo) (string, error) {
 		return "", fmt.Errorf("internal: NULL in comparison (parser should reject)")
 	}
 	return "", fmt.Errorf("internal: unknown value kind %d", v.Kind)
+}
+
+// normalizeDate returns the calendar date an ISO 8601 date or datetime
+// names, as written rather than converted to UTC.
+func normalizeDate(s string) (string, error) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Format("2006-01-02"), nil
+		}
+	}
+	return "", fmt.Errorf("not a recognized ISO 8601 date")
 }
 
 // normalizeDateTime accepts common ISO 8601 forms and returns a canonical

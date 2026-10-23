@@ -18,6 +18,7 @@ func testSchema() map[string]FieldInfo {
 		"Archived":  {Name: "Archived", Type: FieldBoolean},
 		"DueDate":   {Name: "DueDate", Type: FieldDateTime},
 		"Modified":  {Name: "Modified", Type: FieldDateTime},
+		"Start":     {Name: "Start", Type: FieldDate},
 		"ID":        {Name: "ID", Type: FieldNumber, ReadOnly: true},
 		"Owner":     {Name: "Owner", Type: FieldPerson},
 		"Reviewers": {Name: "Reviewers", Type: FieldPerson, Multi: true},
@@ -100,6 +101,12 @@ func TestToOData(t *testing.T) {
 			name: "datetime date-only normalized to midnight UTC and quoted",
 			pred: cmp("Modified", "<", vstr("2024-01-01")),
 			want: "fields/Modified lt '2024-01-01T00:00:00Z'",
+		},
+
+		{
+			name: "date-only column filters by the bare date",
+			pred: cmp("Start", ">=", vstr("2024-01-15T12:30:00Z")),
+			want: "fields/Start ge '2024-01-15'",
 		},
 
 		// IS NULL / IS NOT NULL

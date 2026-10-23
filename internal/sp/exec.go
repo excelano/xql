@@ -1345,7 +1345,7 @@ func typesCompatibleForUpdate(src cell.ColumnType, target FieldType) bool {
 		return src == cell.TypeInt || src == cell.TypeFloat
 	case FieldBoolean:
 		return src == cell.TypeBool
-	case FieldDateTime:
+	case FieldDateTime, FieldDate:
 		return src == cell.TypeString || src == cell.TypeDate
 	}
 	return false
@@ -1426,17 +1426,20 @@ func evalCellToFieldJSON(c eval.EvalCell, target FieldType) (any, error) {
 		if c.Type == cell.TypeBool {
 			return c.Cell.Bool, nil
 		}
-	case FieldDateTime:
-		switch c.Type {
-		case cell.TypeDate:
-			return c.Cell.Date.UTC().Format("2006-01-02T15:04:05Z"), nil
-		case cell.TypeString:
-			ts, err := cell.ParseDateString(c.Cell.Str)
-			if err != nil {
+	case FieldDateTime, FieldDate:
+		ts := c.Cell.Date
+		if c.Type == cell.TypeString {
+			var err error
+			if ts, err = cell.ParseDateString(c.Cell.Str); err != nil {
 				return nil, fmt.Errorf("invalid datetime %q: %w", c.Cell.Str, err)
 			}
-			return ts.UTC().Format("2006-01-02T15:04:05Z"), nil
+		} else if c.Type != cell.TypeDate {
+			break
 		}
+		if target == FieldDate {
+			return ts.Format("2006-01-02"), nil
+		}
+		return ts.UTC().Format("2006-01-02T15:04:05Z"), nil
 	}
 	return nil, fmt.Errorf("cannot coerce %s expression result to %s target", c.Type, target)
 }
@@ -1555,7 +1558,7 @@ func validateAssignment(col string, v parse.Value, schema map[string]FieldInfo) 
 // person or lookup, a hyperlink, a calculated or an unrecognized column.
 func checkWritable(col string, info FieldInfo) error {
 	switch info.writeType() {
-	case FieldText, FieldNote, FieldNumber, FieldBoolean, FieldDateTime, FieldChoice:
+	case FieldText, FieldNote, FieldNumber, FieldBoolean, FieldDateTime, FieldDate, FieldChoice:
 		return nil
 	}
 	kind := string(info.Type)
@@ -1579,7 +1582,7 @@ func valueMatchesType(v parse.Value, t FieldType) error {
 		if v.Kind != parse.ValBool {
 			return fmt.Errorf("expected true or false, got %s", valueKindName(v.Kind))
 		}
-	case FieldDateTime:
+	case FieldDateTime, FieldDate:
 		if v.Kind != parse.ValString {
 			return fmt.Errorf("expected ISO 8601 datetime string, got %s", valueKindName(v.Kind))
 		}
@@ -1626,11 +1629,10 @@ func valueToFieldJSON(v parse.Value, t FieldType) (any, error) {
 	case FieldBoolean:
 		return v.Bool, nil
 	case FieldDateTime:
-		s, err := normalizeDateTime(v.Str)
-		if err != nil {
-			return nil, err
-		}
-		return s, nil
+		return normalizeDateTime(v.Str)
+	case FieldDate:
+		// SharePoint stores a bare date as midnight in the site's time zone.
+		return normalizeDate(v.Str)
 	}
 	return nil, fmt.Errorf("internal: cannot serialize value to type %s", t)
 }

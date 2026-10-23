@@ -120,6 +120,7 @@ func TestValueToFieldJSON(t *testing.T) {
 		{"boolean false", vbool(false), FieldBoolean, false},
 		{"datetime full ISO preserved", vstr("2024-01-15T12:30:00Z"), FieldDateTime, "2024-01-15T12:30:00Z"},
 		{"datetime date-only normalized", vstr("2024-01-01"), FieldDateTime, "2024-01-01T00:00:00Z"},
+		{"date column takes the bare date", vstr("2024-01-01T23:00:00-05:00"), FieldDate, "2024-01-01"},
 		{"null becomes nil on text", vnull(), FieldText, nil},
 		{"null becomes nil on number", vnull(), FieldNumber, nil},
 		{"null becomes nil on datetime", vnull(), FieldDateTime, nil},
