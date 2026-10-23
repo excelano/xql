@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package render
 
 import (
@@ -205,6 +208,8 @@ func stringify(v any) string {
 			return fmt.Sprintf("%d", int64(x))
 		}
 		return fmt.Sprintf("%g", x)
+	case fmt.Stringer:
+		return x.String()
 	}
 	return fmt.Sprintf("%v", v)
 }

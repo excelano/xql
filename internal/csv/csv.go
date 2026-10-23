@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 // Package csv is the CSV backend for xql. It loads delimited text files into
 // the shared cell.Table substrate (with inferred per-column types) and writes
 // modified tables back. The executor lives alongside the loader because both
@@ -11,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -167,7 +171,8 @@ func LoadCSVReader(label string, src io.Reader, opts LoadOptions) (*cell.Table, 
 }
 
 // SaveCSV writes the cell.Table back to its bound path (or to dst if non-empty).
-// Cells emit in their canonical string form; NULL becomes an empty field.
+// Cells read from the file emit their source text; assigned cells emit their
+// canonical string form, with NULL as an empty field.
 func SaveCSV(t *cell.Table, dst string) error {
 	if dst == "" {
 		dst = t.Path
@@ -190,7 +195,7 @@ func SaveCSV(t *cell.Table, dst string) error {
 	rec := make([]string, len(t.Columns))
 	for _, row := range t.Rows {
 		for i, name := range t.Columns {
-			rec[i] = cell.FormatCell(row[i], t.Schema[name].Type)
+			rec[i] = row[i].Text(t.Schema[name].Type)
 		}
 		if err := w.Write(rec); err != nil {
 			return fmt.Errorf("writing row: %w", err)
@@ -276,12 +281,18 @@ func looksLikeInt(s string) bool {
 //     looksLikeInt: these are almost always identifiers, and inferring
 //     them as numeric destroys the leading zero on round-trip. "0.5"
 //     and "0" are still allowed.
+//   - Values a float64 cannot hold exactly, such as a 20-digit account
+//     number. Two such IDs can round to the same float and then match
+//     the same WHERE, so the column stays string.
 func looksLikeFloat(s string) bool {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return false
 	}
 	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return false
+	}
+	if !exactFloat(s, f) {
 		return false
 	}
 	body := s
@@ -292,6 +303,17 @@ func looksLikeFloat(s string) bool {
 		return false
 	}
 	return true
+}
+
+// exactFloat reports whether f, the parse of s, denotes the same decimal
+// number s does. "10.10" and "1E5" pass; "12345678901234567890" does not.
+func exactFloat(s string, f float64) bool {
+	src, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return false
+	}
+	back, _ := new(big.Rat).SetString(strconv.FormatFloat(f, 'g', -1, 64))
+	return src.Cmp(back) == 0
 }
 
 func looksLikeBool(s string) bool {

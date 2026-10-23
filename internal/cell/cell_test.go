@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package cell
 
 import (
@@ -83,19 +86,19 @@ func TestParseCell(t *testing.T) {
 		want Cell
 	}{
 		{"empty is null", "", TypeInt, Cell{Null: true}},
-		{"whitespace is null", "   ", TypeInt, Cell{Null: true}},
-		{"int parses", "42", TypeInt, Cell{Int: 42}},
-		{"int negative", "-7", TypeInt, Cell{Int: -7}},
-		{"int unparseable becomes null", "abc", TypeInt, Cell{Null: true}},
-		{"float parses", "3.14", TypeFloat, Cell{Float: 3.14}},
-		{"bool true word", "true", TypeBool, Cell{Bool: true}},
-		{"bool yes", "yes", TypeBool, Cell{Bool: true}},
-		{"bool false word", "false", TypeBool, Cell{Bool: false}},
-		{"bool no", "no", TypeBool, Cell{Bool: false}},
-		{"bool unparseable becomes null", "maybe", TypeBool, Cell{Null: true}},
-		{"date iso", "2024-01-15", TypeDate, Cell{Date: mustDate("2024-01-15")}},
-		{"date with time", "2024-01-15T12:00:00Z", TypeDate, Cell{Date: mustTime("2024-01-15T12:00:00Z")}},
-		{"date unparseable becomes null", "yesterday", TypeDate, Cell{Null: true}},
+		{"whitespace is null", "   ", TypeInt, Cell{Null: true, Raw: "   "}},
+		{"int parses", "42", TypeInt, Cell{Int: 42, Raw: "42"}},
+		{"int negative", "-7", TypeInt, Cell{Int: -7, Raw: "-7"}},
+		{"int unparseable becomes null", "abc", TypeInt, Cell{Null: true, Raw: "abc"}},
+		{"float parses", "3.14", TypeFloat, Cell{Float: 3.14, Raw: "3.14"}},
+		{"bool true word", "true", TypeBool, Cell{Bool: true, Raw: "true"}},
+		{"bool yes", "yes", TypeBool, Cell{Bool: true, Raw: "yes"}},
+		{"bool false word", "false", TypeBool, Cell{Bool: false, Raw: "false"}},
+		{"bool no", "no", TypeBool, Cell{Bool: false, Raw: "no"}},
+		{"bool unparseable becomes null", "maybe", TypeBool, Cell{Null: true, Raw: "maybe"}},
+		{"date iso", "2024-01-15", TypeDate, Cell{Date: mustDate("2024-01-15"), Raw: "2024-01-15"}},
+		{"date with time", "2024-01-15T12:00:00Z", TypeDate, Cell{Date: mustTime("2024-01-15T12:00:00Z"), Raw: "2024-01-15T12:00:00Z"}},
+		{"date unparseable becomes null", "yesterday", TypeDate, Cell{Null: true, Raw: "yesterday"}},
 		{"string keeps raw", "hello world", TypeString, Cell{Str: "hello world"}},
 	}
 	for _, tt := range tests {
@@ -205,5 +208,43 @@ func TestCompare(t *testing.T) {
 				t.Fatalf("got %d, want sign %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCellTextKeepsSourceText(t *testing.T) {
+	tests := []struct {
+		raw  string
+		typ  ColumnType
+		want string
+	}{
+		{"10.10", TypeFloat, "10.10"},
+		{"1E5", TypeFloat, "1E5"},
+		{"N/A", TypeFloat, "N/A"},
+		{"yes", TypeBool, "yes"},
+		{"  ", TypeString, "  "},
+		{"", TypeInt, ""},
+	}
+	for _, tt := range tests {
+		if got := ParseCell(tt.raw, tt.typ).Text(tt.typ); got != tt.want {
+			t.Errorf("ParseCell(%q).Text = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+	if got := (Cell{Float: 10.1}).Text(TypeFloat); got != "10.1" {
+		t.Errorf("assigned cell Text = %q, want canonical 10.1", got)
+	}
+}
+
+func TestAsAnyVerbatim(t *testing.T) {
+	if got := ParseCell("10.1", TypeFloat).AsAny(TypeFloat); got != 10.1 {
+		t.Errorf("canonical source: got %#v, want plain float64", got)
+	}
+	got := ParseCell("10.10", TypeFloat).AsAny(TypeFloat)
+	v, ok := got.(Verbatim)
+	if !ok || v.Text != "10.10" || v.Value != 10.1 {
+		t.Fatalf("got %#v, want Verbatim{10.10, 10.1}", got)
+	}
+	b, err := v.MarshalJSON()
+	if err != nil || string(b) != "10.1" {
+		t.Errorf("MarshalJSON = %s, %v; want 10.1", b, err)
 	}
 }

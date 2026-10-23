@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package csv
 
 import (
@@ -35,6 +38,8 @@ func TestInferColumn(t *testing.T) {
 		{"Infinity keeps column out of float", [][]string{{"1.5"}, {"Inf"}}, cell.TypeString},
 		{"signed leading zero is rejected", [][]string{{"-01"}, {"-02"}}, cell.TypeString},
 		{"plain zero is fine", [][]string{{"0"}, {"5"}, {"-7"}}, cell.TypeInt},
+		{"IDs past int64 stay string", [][]string{{"12345678901234567890"}, {"98765432109876543210"}}, cell.TypeString},
+		{"trailing zeros and e-notation stay float", [][]string{{"10.10"}, {"1E5"}, {"0.30"}}, cell.TypeFloat},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -259,4 +264,31 @@ func keysOf(m map[string]cell.ColumnInfo) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestSaveKeepsUntouchedCells(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ids.csv")
+	content := "id,sku,price,note\n" +
+		"12345678901234567890,1E5,10.10,a\n" +
+		"98765432109876543210,2.50,N/A,b\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tbl, err := LoadCSV(path, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tbl.Rows[0][3] = cell.Cell{Str: "z"}
+	if err := SaveCSV(tbl, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(content, ",a\n", ",z\n", 1)
+	if string(got) != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
 }

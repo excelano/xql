@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 // Package cell defines the typed-cell substrate shared by all XQL backends.
 // A Table is a rectangular grid of Cells under a fixed schema; backends
 // (CSV today, SharePoint tomorrow) hydrate into this shape so the
@@ -5,6 +8,7 @@
 package cell
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -64,6 +68,11 @@ type ColumnInfo struct {
 // Cell is a typed value. Exactly one of the Str/Int/Float/Bool/Date fields
 // is meaningful, picked by the column's ColumnType. An empty source cell
 // becomes a Cell with Null = true regardless of the column type.
+//
+// Raw is the source text of a cell read from a file, kept so that a cell no
+// statement assigned writes back and displays as it was read: "10.10" stays
+// "10.10" and an unparseable "N/A" in a float column stays "N/A". Computed
+// and assigned cells leave it empty and format canonically.
 type Cell struct {
 	Null  bool
 	Str   string
@@ -71,6 +80,7 @@ type Cell struct {
 	Float float64
 	Bool  bool
 	Date  time.Time
+	Raw   string
 }
 
 // Row is one record in the same column order as Table.Columns.
@@ -109,9 +119,18 @@ func ParseDateString(s string) (time.Time, error) {
 }
 
 // ParseCell converts a raw text cell to a typed Cell using the column's
-// inferred type. An unparseable cell becomes NULL rather than failing the
-// load; pin the column to string via --type if you prefer the raw text.
+// inferred type, keeping raw as the cell's Raw text. An unparseable cell
+// becomes NULL rather than failing the load; pin the column to string via
+// --type to query the raw text.
 func ParseCell(raw string, t ColumnType) Cell {
+	c := parseTyped(raw, t)
+	if t != TypeString || c.Null {
+		c.Raw = raw
+	}
+	return c
+}
+
+func parseTyped(raw string, t ColumnType) Cell {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return Cell{Null: true}
@@ -319,6 +338,27 @@ func Compare(a, b Cell, t ColumnType) int {
 	}
 }
 
+// Text returns the cell's field text for writing back to a file: the source
+// text when the cell has one, otherwise the canonical FormatCell form.
+func (v Cell) Text(t ColumnType) string {
+	if v.Raw != "" {
+		return v.Raw
+	}
+	return FormatCell(v, t)
+}
+
+// Verbatim is a typed value read from a file whose source text differs from
+// its canonical form, such as "10.10" or "1E5". The row renderers print Text
+// through String; JSON encodes Value.
+type Verbatim struct {
+	Text  string
+	Value any
+}
+
+func (v Verbatim) String() string { return v.Text }
+
+func (v Verbatim) MarshalJSON() ([]byte, error) { return json.Marshal(v.Value) }
+
 // Render returns the human-readable form of a Cell for table/TSV output.
 // NULL renders as the empty string.
 func (v Cell) Render(t ColumnType) string {
@@ -329,11 +369,21 @@ func (v Cell) Render(t ColumnType) string {
 }
 
 // AsAny returns the Cell as an untyped Go value suitable for JSON encoding.
-// NULL becomes nil; everything else returns the underlying typed value.
+// NULL becomes nil; a cell whose source text is not its canonical form
+// becomes a Verbatim; everything else returns the underlying typed value.
 func (v Cell) AsAny(t ColumnType) any {
 	if v.Null {
 		return nil
 	}
+	if v.Raw != "" && t != TypeString {
+		if canon := FormatCell(v, t); canon != v.Raw {
+			return Verbatim{Text: v.Raw, Value: v.typedValue(t)}
+		}
+	}
+	return v.typedValue(t)
+}
+
+func (v Cell) typedValue(t ColumnType) any {
 	switch t {
 	case TypeInt:
 		return v.Int

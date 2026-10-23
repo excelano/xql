@@ -168,11 +168,13 @@ Headers are trimmed of leading and trailing whitespace; the load fails clearly i
 
 `xql` samples the first 1024 rows of a CSV and infers a type per column: `int`, `float`, `bool`, `date`, or `string`. Comparisons use the inferred type, so `Priority > 2` does numeric compare and `Modified < '2024-01-01'` does date compare. The `describe` command shows what was inferred. Override at startup with `--type Name=string,Priority=int` if inference picks wrong.
 
-A few inference behaviors are worth knowing:
+The inferred type governs comparison, sorting and arithmetic, not how a cell is written. A cell that no statement assigns is written back as it was read, and displays that way too: `10.10`, `1E5` and `00123` keep their text in a committed file, in `SELECT` output and in `--output`, while JSON output carries the typed value (`10.1`). A cell the column's type cannot parse, such as `N/A` in a float column, reads as `NULL` in queries and is written back unchanged. Only the cells a `SET` assigns or an `INSERT` writes take the canonical form of their type.
 
-- **Leading-zero values stay strings.** `"07030"`, `"007"`, `"-01"` look numeric to `strconv` but are almost always identifiers (ZIP codes, employee numbers, phone extensions). Inferring them as `int` would silently drop the leading zero on the next write, so the column infers as `string`. Pass `--type Code=int` to override.
-- **`NaN` and `Inf` are not treated as numeric.** Excel's `#DIV/0!`-as-`NaN` cells leak through `strconv.ParseFloat`, but `NaN` breaks SQL equality (NaN ≠ NaN) and pollutes round-trips, so the column falls back to `string` whenever they appear.
-- **Scientific notation in the data still infers as `float`.** If you have integer IDs that Excel rendered as `1.23E+12`, the round-trip will not restore the original integer string. Pin the column with `--type ID=string` to preserve the literal text.
+Some values keep a column out of a numeric type:
+
+- **Leading-zero values stay strings.** `"07030"`, `"007"`, `"-01"` look numeric to `strconv` but are almost always identifiers (ZIP codes, employee numbers, phone extensions). As `int`, `007` would equal `7` and sort among the single digits, so the column infers as `string`. Pass `--type Code=int` to override.
+- **`NaN` and `Inf` are not treated as numeric.** Excel's `#DIV/0!`-as-`NaN` cells leak through `strconv.ParseFloat`, but `NaN` breaks SQL equality (NaN ≠ NaN), so the column falls back to `string` whenever they appear.
+- **Numbers a float cannot hold exactly stay strings.** A 20-digit account number would round to the nearest float, and two such IDs could then match the same `WHERE`, so the column infers as `string`. `10.10` and `1E5` are exact and infer as `float`.
 
 ### SharePoint backend
 
@@ -248,7 +250,7 @@ That writes `~/.claude/skills/xql/` and stamps in the version it came from, so a
 
 The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, or a build from source.
 
-The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, splits the SharePoint and local-CSV lanes so the "reach for DuckDB" caveat lands only where DuckDB is actually an option, and points at xfiles for library *files* rather than list rows.
+The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, splits the SharePoint and local-CSV lanes so the advice to switch to a full SQL engine lands only where one can read the data, and points at xfiles for library *files* rather than list rows.
 
 ## Security
 
