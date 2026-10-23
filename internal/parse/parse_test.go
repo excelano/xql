@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package parse
 
 import (
@@ -1006,5 +1009,30 @@ func TestParseMultiColumnDistinctRejectedByName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "one expression") {
 		t.Errorf("the error should name the limitation rather than report a missing ')'; got %v", err)
+	}
+}
+
+func TestParseErrorHintsOneTable(t *testing.T) {
+	tests := []struct {
+		in       string
+		wantHint bool
+	}{
+		{"SELECT Status, COUNT(*) FROM clean GROUP BY Status", true},
+		{"UPDATE w SET Status = 'X'", true},
+		{"SELECT a.Vendor FROM clean a JOIN clean b ON a.Account = b.Account", true},
+		{"DELETE FROM t WHERE a = 1", true},
+		{"INSERT INTO t (a) VALUES (1)", true},
+		{"SELECT a WHERE b = 'from here' LIMIT", false},
+		{"UPDATE SET", false},
+	}
+	for _, tt := range tests {
+		_, err := Parse(tt.in)
+		pe, ok := err.(*ParseError)
+		if !ok {
+			t.Fatalf("%q: want *ParseError, got %v", tt.in, err)
+		}
+		if got := pe.Hint != ""; got != tt.wantHint {
+			t.Errorf("%q: hint = %q, want hint: %v", tt.in, pe.Hint, tt.wantHint)
+		}
 	}
 }

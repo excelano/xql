@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 // Package repl drives the interactive prompt shared across backends. Each
 // backend provides Execute / Describe / Refresh closures plus a banner and a
 // prompt string; the REPL handles line editing, history, meta-commands, the
@@ -405,5 +408,8 @@ func printParseError(out io.Writer, input string, err error) {
 	fmt.Fprintf(out, "  %s\n", input)
 	if pe.Pos >= 0 && pe.Pos <= len(input) {
 		fmt.Fprintf(out, "  %s^\n", strings.Repeat(" ", pe.Pos))
+	}
+	if pe.Hint != "" {
+		fmt.Fprintf(out, "hint: %s\n", pe.Hint)
 	}
 }

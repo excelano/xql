@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package main
 
 import (
@@ -23,7 +26,7 @@ func runSPImpl(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagExec           = fs.String("exec", "", execUsage)
 		flagDescribe       = fs.Bool("describe", false, "Print the bound list's column schema and exit; skip the REPL. Combine with --all-fields to include hidden columns")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagJSON           = fs.Bool("json", false, jsonUsage)

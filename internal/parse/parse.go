@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package parse
 
 import (
@@ -202,15 +205,22 @@ const (
 )
 
 // ParseError carries a byte-offset position to enable caret-style error
-// rendering in later phases.
+// rendering in later phases. Hint, when set, suggests the likely fix.
 type ParseError struct {
-	Msg string
-	Pos int
+	Msg  string
+	Pos  int
+	Hint string
 }
 
 func (e *ParseError) Error() string {
-	return fmt.Sprintf("parse error at offset %d: %s", e.Pos, e.Msg)
+	s := fmt.Sprintf("parse error at offset %d: %s", e.Pos, e.Msg)
+	if e.Hint != "" {
+		s += "\nhint: " + e.Hint
+	}
+	return s
 }
+
+const oneTableHint = "xql queries the one table it was opened on: omit FROM, JOIN and the table name (SELECT ... WHERE ..., UPDATE SET ... WHERE ...)"
 
 func parseErrorAt(pos int, msg string) *ParseError {
 	return &ParseError{Msg: msg, Pos: pos}
@@ -246,10 +256,47 @@ func PreProcess(input string) (string, bool) {
 // REPL or --exec.
 func Parse(input string) (Stmt, error) {
 	p, err := newParser(input)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		var stmt Stmt
+		if stmt, err = p.parseStatement(); err == nil {
+			return stmt, nil
+		}
 	}
-	return p.parseStatement()
+	if pe, ok := err.(*ParseError); ok && namesTable(input) {
+		pe.Hint = oneTableHint
+	}
+	return nil, err
+}
+
+// namesTable reports whether input reads like SQL written for a named table:
+// a FROM, JOIN or INTO anywhere, or a name between UPDATE and SET. Lexing
+// skips past characters it cannot read, so `a.Vendor ... JOIN` still counts.
+func namesTable(input string) bool {
+	l := &lexer{src: input}
+	var prev, prev2 TokenType = TokEOF, TokEOF
+	for {
+		t, err := l.next()
+		if err != nil {
+			pe, ok := err.(*ParseError)
+			if !ok || pe.Pos >= len(input) {
+				return false
+			}
+			l.pos = pe.Pos + 1
+			continue
+		}
+		switch {
+		case t.Type == TokEOF:
+			return false
+		case t.Type == TokIdent:
+			switch strings.ToUpper(t.Lit) {
+			case "FROM", "JOIN", "INTO":
+				return true
+			}
+		case t.Type == TokSet && prev2 == TokUpdate && (prev == TokIdent || prev == TokQuotedIdent):
+			return true
+		}
+		prev2, prev = prev, t.Type
+	}
 }
 
 // Lexer.

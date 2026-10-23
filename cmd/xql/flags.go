@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package main
 
 import (
@@ -61,9 +64,12 @@ func printFlags(w io.Writer, fs *flag.FlagSet) {
 	})
 }
 
-// jsonUsage describes the --json shorthand. Every backend registers the same
-// flag, so the wording lives in one place.
-const jsonUsage = "Emit JSON; shorthand for --mode json"
+// jsonUsage and execUsage describe flags every backend registers, so the
+// wording lives in one place.
+const (
+	jsonUsage = "Emit JSON; shorthand for --mode json"
+	execUsage = "Run one SQL statement and exit (non-REPL mode); statements name no table: SELECT ... WHERE ..., UPDATE SET ... WHERE ..."
+)
 
 // resolveMode folds the --json shorthand into --mode. xray spells JSON output
 // --json, so reaching for that spelling here finds it too, while --mode keeps

@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package main
 
 import (
@@ -24,7 +27,7 @@ func runXingletImpl(args []string) int {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		flagExec           = fs.String("exec", "", "Run one SQL statement and exit (non-REPL mode)")
+		flagExec           = fs.String("exec", "", execUsage)
 		flagDescribe       = fs.Bool("describe", false, "Print the loaded xinglet's column schema and exit; skip the REPL")
 		flagMode           = fs.String("mode", "", "Output mode: table | tsv | csv | json (auto-detected if blank)")
 		flagJSON           = fs.Bool("json", false, jsonUsage)
