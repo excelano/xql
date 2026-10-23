@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/excelano/graphauth v0.2.0
-	github.com/mattn/go-runewidth v0.0.30
-	github.com/peterh/liner v1.2.2
+	github.com/mattn/go-runewidth v0.0.31
+	github.com/peterh/liner v1.2.3
 )
 
 require (
