@@ -1,277 +1,167 @@
 ---
 name: xql
 description: >-
-  Run SQL against one bound table with `xql` — one grammar, three backends, two lanes that
-  have little in common. **SharePoint Lists (`xql sp`) — the strong lane.** Fires on "pull
-  the tasks list", "which items are still open", "bulk-update the status on these", "count
-  them by owner", "the list has 4,000 items and the browser view is useless", "find the
-  duplicates", "export the list to CSV". It handles the OData translation, the paging and the
-  typed-field round-tripping that PnP PowerShell and hand-rolled Graph calls get wrong, and
-  every write previews the affected rows and prompts before committing. Prefer it outright
-  here — the DuckDB caveat below does not apply, because there is no DuckDB over a SharePoint
-  list. **Local CSV/TSV (`xql csv`, or just `xql data.csv`) — the convenience lane.** Filter,
-  aggregate, group, dedupe or profile one delimited file. In this lane only, JOINs,
-  subqueries, CTEs, UNION and window functions are permanently out of scope: use DuckDB. Also
-  reads a hosted xinglist (`xql xinglet`, read-only). On a local file, profile with xray,
-  repair values with xled and reshape with xshape first. For SharePoint *files and folders*
-  rather than list rows, that is xfiles (`xcp`, `xftp`, `xsync`, `xfind`, `xtree`).
+  Run SQL against one table with `xql`: a SharePoint list (`xql sp <list-url>`), a local
+  CSV/TSV (`xql data.csv`), or a hosted xinglist (`xql xinglet`, read-only). Use it to query,
+  count, group, dedupe, export or bulk-update SharePoint list rows ("which items are still
+  open", "bulk-update the status on these", "the list has 4,000 items"), and to filter or
+  aggregate one delimited file. One table per statement: no FROM, JOIN or subquery.
+  SharePoint files and folders are xfiles, not xql.
 ---
 
 # xql — Excelano Query Language CLI
 
-`xql` binds to one tabular resource at startup and runs a small SQL grammar against it. Reads run immediately; writes preview a sample of affected rows and prompt for confirmation before committing. One grammar, three backends: local CSV/TSV (`csv`), Microsoft 365 SharePoint List (`sp`), and a hosted xinglist snapshot (`xinglet`, read-only).
+`xql` binds to one table at startup and runs a small SQL grammar against it. Reads run immediately; writes preview a sample of the affected rows and commit only when told to. The backends are local CSV/TSV (`csv`), a Microsoft 365 SharePoint list (`sp`), and a hosted xinglist snapshot (`xinglet`, read-only).
 
-Authoritative sources for this skill are the `xql` binary itself (`xql <backend> --help`, `describe` inside the REPL) and the maintainer-authored [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) and [README.md](https://github.com/excelano/xql/blob/main/README.md). This skill mirrors those; if it conflicts with them, they win.
+The binary is authoritative: `xql <backend> --help`, and `describe` inside the REPL. [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) is the full grammar and [README.md](https://github.com/excelano/xql/blob/main/README.md) the CSV dialect and type-inference rules. Where this skill disagrees with them, they win.
 
-## When to reach for xql (and when not to)
+## When to reach for xql, and when not to
 
-Reach for xql when the user has one CSV, one TSV, one SharePoint list, or one xinglist, and wants to filter, aggregate, profile, dedupe, or bulk-edit it with SQL. That is the whole story. It replaces spreadsheet-in-Excel, hand-written per-transform scripts, and — for SharePoint specifically — the PnP PowerShell "loop the list and PATCH each item" pattern.
+Reach for xql when the user has one CSV, one TSV, one SharePoint list or one xinglist and wants to filter, aggregate, profile, dedupe or bulk-edit it with SQL. The two lanes are not equally strong.
 
-The two lanes are not equally strong, and it is worth knowing which one you are in.
+**SharePoint (`xql sp`)** is the best available tool for list rows. The alternatives are PnP PowerShell and raw Graph OData, both of which make you write the paging, the `$filter` translation, the field-type round-trip and the write loop by hand. None of the SQL engines likely to be installed reads a SharePoint list, so when a task outgrows the grammar here, split it into one list at a time rather than looking for another engine.
 
-**SharePoint (`xql sp`).** xql is the best available answer, not a convenience. The alternatives are PnP PowerShell and raw Graph OData, both of which make you write the paging, the `$filter` translation, the field-type round-trip and the write loop by hand. Nothing about the grammar limits below argues for going back to those — there is no DuckDB over a SharePoint list, so "reach for DuckDB instead" is not an option in this lane and should not be read as one.
-
-**Local CSV/TSV (`xql csv`).** xql is a convenience: a single-table SQL subset with sane CSV handling, which is enough for most one-file questions and beats writing a script. When the question outgrows it, DuckDB is genuinely better and you should switch without hesitation.
-
-Do not reach for xql if the task needs JOINs, subqueries, CTEs, `UNION`, window functions, or an expression on the right side of a comparison. Those are permanently out of scope by design — xql binds to one table per session. Over CSV, that means DuckDB; for writes across multiple tables, sqlite3 or the source system's own API. Over SharePoint it means splitting the work into one bound list at a time, since the fallback does not exist.
+**Local CSV/TSV (`xql csv`)** is a convenience: a single-table SQL subset with careful CSV handling, enough for most one-file questions. When a question needs a JOIN, a subquery, a CTE, `UNION`, a window function or a second file, switch to a full engine. Check what is installed (`command -v duckdb sqlite3 csvsql`) rather than assuming one: DuckDB reads CSV directly, `sqlite3` takes it through `.import --csv`, and `csvsql --query` (csvkit) runs SQL over CSV files with no setup.
 
 ## The neighbours
 
-Same file, different verb. On a **local delimited file**, xql is the last step, not the first: [xray](https://github.com/excelano/xray) profiles it read-only and names the hazards, [xled](https://github.com/excelano/xled) repairs cell values (currency trapped as text, stripped leading zeros, a buried header), and [xshape](https://github.com/excelano/xshape) fixes the geometry (unpivot a wide export before you can group by year). Querying a file none of those have seen is how a leading zero becomes an integer.
+On a **local delimited file**, xql is the last step, not the first: [xray](https://github.com/excelano/xray) profiles it read-only and names the hazards, [xled](https://github.com/excelano/xled) repairs cell values (currency stored as text, stripped leading zeros, a buried header), and [xshape](https://github.com/excelano/xshape) fixes the geometry (unpivot a wide export before you can group by year).
 
-On **SharePoint**, the neighbour is a different family: xql owns *list rows and columns*, and the [xfiles](https://github.com/excelano/xfiles) tools own *files and folders* in a document library — `xcp` (copy, like scp), `xftp` (an interactive session), `xsync` (mirror a tree, like rsync), `xfind` (walk for matching paths), `xtree` (print the tree). If the task is "upload this folder to the library" or "pull down everything under /Shared Documents/Reports", that is xfiles, not xql. They share one sign-in: the same app registration and the same token cache.
+On **SharePoint**, xql owns list rows and columns, and the [xfiles](https://github.com/excelano/xfiles) tools own files and folders in a document library: copying, mirroring, finding and listing them. They share one sign-in.
 
 ## Feature guard
 
-The recipes and flags below assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `YEAR`/`MONTH`/`DAY`, expression `GROUP BY`, and `--describe`. An "unknown function" error on one of those names means the installed copy predates it; upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (macOS), or by re-running the install one-liner from the README. Falling back means rewriting explicitly — `SELECT column` instead of `SELECT LOWER(column)`, and grouping on the raw date instead of `YEAR(date)`.
+The recipes assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `YEAR`/`MONTH`/`DAY`, expression `GROUP BY`, and `--describe`. An "unknown function" error on one of those names means the installed copy predates it.
 
-## Dispatch — how xql picks a backend
+They also assume that cells a statement does not assign are written back as they were read. If `--describe` reports a column of 20-digit IDs as `float`, the installed copy predates that: pass `--type Col=string` for every column you are not assigning, or upgrade.
 
-The top-level dispatcher scans past any leading flags to find the first non-flag token, then routes on it:
+Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (macOS), or the install one-liner in the README.
 
-1. If the token is a registered subcommand (`csv`, `sp`, `xinglet`, or `help`/`--help`/`-h`/`-V`/`--version`), that backend runs with the remaining args (leading flags preserved). `xql auth` is answered the same way, before any backend is bound.
-2. Otherwise, if the token has a recognized file extension (`.csv` or `.tsv`), the CSV backend runs with the full args.
-3. Otherwise, error.
+## Invocation
 
-So these are all equivalent for a local CSV file:
-
-```
-xql csv data.csv
-xql data.csv
-xql --describe data.csv
-xql data.csv --describe
-```
-
-SharePoint and xinglet are never inferred — they always require the explicit subcommand plus a URL:
+A path ending in `.csv` or `.tsv` runs the CSV backend without the subcommand, so `xql data.csv` and `xql csv data.csv` are the same. SharePoint and xinglet always need the subcommand and a URL:
 
 ```
 xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks
 xql xinglet xinglet://4babff02-909f-4dba-b3df-3edf14b778bf
 ```
 
-`-` reads the table from stdin, but only after an explicit `csv`, because stdin carries no
-extension for step 2 to infer from. It also needs `--exec` or `--describe`: the REPL would
-otherwise be reading its commands from the stream the table just came out of. A committed
-write from stdin needs `--output PATH`, since there is no source file to write back to.
+`-` reads a CSV from stdin, after an explicit `csv` and with `--exec` or `--describe`. A committed write from stdin needs `--output PATH`, since there is no file to write back to.
 
 ```
 cat data.csv | xql csv - --exec "SELECT * WHERE qty > 10"
 ```
 
-## Exit codes
+Exit `0` is success, including a query that matches no rows, so read the row count rather than the status. `1` is bad input: an unreadable source, a parse error, a rejected statement, a failed sign-in. `2` is a bad invocation: an unknown flag, a missing argument, contradictory options.
 
-`0` is success, and that includes a query matching no rows — an empty result is the answer,
-not a failure, so read the row count rather than the exit status. `1` is bad input: an
-unreadable source, a parse error, a statement the backend rejects, a failed sign-in. `2` is a
-bad invocation: an unknown flag, a missing argument, contradictory options. `--help` at any
-level, including `xql csv --help`, is a success and prints to stdout.
+## The grammar
 
-## SQL subset — what's in and what's out
+```
+SELECT [DISTINCT] projection, ... [WHERE ...] [GROUP BY expr, ...] [HAVING ...] [ORDER BY key, ...] [LIMIT n] [OFFSET m]
+UPDATE SET col = expr, ... [WHERE ...]
+DELETE [WHERE ...]
+INSERT (col, ...) VALUES (val, ...)
+```
 
-Grammar shared across every backend:
+There is no `FROM` and no table name: `xql data.csv --exec "SELECT * WHERE Status = 'Open'"`. Ordinary SQL written with `FROM t` or `UPDATE t SET` fails to parse, and the error carries a hint saying so.
 
-- `SELECT [DISTINCT] projection_list [WHERE ...] [GROUP BY expr, ...] [HAVING ...] [ORDER BY key, ...] [LIMIT n] [OFFSET m]`
-- `UPDATE SET col = expr, ... [WHERE ...]`
-- `DELETE [WHERE ...]`
-- `INSERT (col, ...) VALUES (val, ...)`
+Projections take arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `COUNT(DISTINCT col)`, `SUM`, `AVG`, `MIN`, `MAX`) and the scalar functions `LOWER`, `UPPER`, `TRIM`, `YEAR`, `MONTH` and `DAY`, which also work in predicates and `GROUP BY`. The left side of a comparison is an expression (`WHERE price * qty > 100`); the right side is always a literal, so `col1 = col2` is not supported. Predicates cover `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] ILIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN a AND b`, `AND`, `OR` and `NOT`.
 
-Note the absence of `FROM`. The bound table is implicit — `xql csv data.csv` then `SELECT *` is enough.
+`HAVING` resolves against source columns and aggregates, not `SELECT` aliases (`HAVING COUNT(*) > 1`, not `HAVING n > 1`); `ORDER BY` does resolve aliases. Keywords and column names are case-insensitive on input. GRAMMAR.md lists the smaller absences, such as expression keys in `ORDER BY` and `LENGTH`/`SUBSTRING`/`ROUND`; check it before assuming a function exists.
 
-Projections may include arithmetic (`price * qty AS line_total`), aggregates (`COUNT(*)`, `COUNT(DISTINCT col)`, `SUM`, `AVG`, `MIN`, `MAX`), and the scalar functions: `LOWER(s)`, `UPPER(s)`, `TRIM(s)` for string normalization, and `YEAR(d)`, `MONTH(d)`, `DAY(d)` for calendar components. Scalars can appear in the projection list, in predicates, and in `GROUP BY` (case-insensitive dedup uses this — see recipe 1). Unknown scalar names produce an "unknown function" error at plan time.
+## Writes
 
-The date accessors take a `date` column or a `string` holding ISO dates; a string cell that isn't a date yields `NULL` for that row, while an `int`/`float` column is rejected before the scan with a pointer at the `--type` override. There is no serial-number reading of a numeric column.
+Writes are dry runs unless committed. In `--exec` mode a write previews and exits without `--commit`, and a bare `DELETE` (no `WHERE`) also needs `--confirm-destructive`. In the REPL a write prompts `Apply? [y/N]:`, and a trailing `!` commits without the prompt, except for a bare `DELETE`, which always prompts. The xinglet backend rejects every write.
 
-Predicates support `=`, `!=`, `<`, `>`, `<=`, `>=`, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] ILIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN a AND b`, and boolean composition with `AND`, `OR`, `NOT`. Left side is an expression (`WHERE price * qty > 100` is fine); right side is always a literal (`col1 = col2` is not supported).
+A committed write rewrites the bound CSV, or PATCHes each affected SharePoint item. `--output PATH` sends the modified CSV to another file instead of overwriting the source.
 
-Out of scope (permanent): `JOIN`, subqueries, `UNION`/`INTERSECT`/`EXCEPT`, CTEs, window functions. Reach for DuckDB when a task needs one of these. Some smaller absences (expression keys in `ORDER BY`, multi-column `COUNT(DISTINCT a, b)`, and the scalar functions `LENGTH`/`SUBSTRING`/`LEFT`/`RIGHT`/`ROUND`) are listed in [GRAMMAR.md](https://github.com/excelano/xql/blob/main/GRAMMAR.md) rather than repeated here — check it, or `xql --help`, before assuming a function exists.
+## Flags
 
-Case-insensitive on keywords AND column names on input; output preserves the canonical header case. Two columns that differ only in case (`ID` and `id`) surface as an ambiguous-column error rather than a guess.
-
-## Write safety
-
-Every write (`INSERT`, `UPDATE`, `DELETE`) previews before it commits:
-
-- **In the REPL:** xql prints the affected count, a sample of matching rows, then prompts `Apply? [y/N]:`. Anything but `y` cancels. Append `!` to the statement to skip the prompt and commit immediately (`UPDATE SET Status = 'Done' WHERE Priority > 3 !`). Bare `DELETE` (no `WHERE`) always prompts, even with `!`.
-- **In `--exec` mode:** writes require `--commit`. Without it, they preview and exit. A bare `DELETE` additionally requires `--confirm-destructive` alongside `--commit`.
-- **On xinglet:** all writes are rejected. The backend is read-only by design.
-
-When a write commits, xql rewrites the bound file (CSV) or PATCHes each affected item (SharePoint). Use `--output PATH` to redirect committed writes to a different CSV instead of overwriting in place.
-
-## Flags — the ones agents actually need
-
-`xql csv <path>` accepts:
+`xql csv <path>`:
 
 | Flag | Effect |
 |------|--------|
 | `--exec "<sql>"` | Run one statement and exit. |
-| `--describe` | Print the schema and exit; no REPL, no SQL required. |
-| `--commit` | Required to apply writes in `--exec` mode. |
-| `--confirm-destructive` | Required to run a bare `DELETE` in `--exec` mode. |
-| `--mode table\|tsv\|csv\|json` | Output format. Defaults to table on TTY, TSV when piped. |
-| `--json` | Shorthand for `--mode json`. Conflicts with any other `--mode`. |
-| `--no-input-header`, `--no-header` | Source has no header; columns become `col1`, `col2`, … |
+| `--describe` | Print the schema and exit. |
+| `--commit` | Apply a write in `--exec` mode. |
+| `--confirm-destructive` | Allow a bare `DELETE` in `--exec` mode. |
+| `--mode table\|tsv\|csv\|json` | Output format; table on a terminal, TSV when piped. |
+| `--json` | Shorthand for `--mode json`. |
+| `--no-input-header`, `--no-header` | The source has no header; columns are `col1`, `col2`, and so on. |
 | `--no-output-header` | Suppress the header row in output. |
-| `-d`, `--delim CHAR` | Field delimiter (use `\t` for tab). Defaults to tab for a `.tsv` file, comma otherwise. |
-| `--type Col=int,Other=string` | Override the sampled type inference. |
-| `--output PATH` | Write results (or committed table) to PATH as CSV. |
+| `-d`, `--delim CHAR` | Field delimiter (`\t` for tab); tab for a `.tsv` file, comma otherwise. |
+| `--type Col=int,Other=string` | Override type inference. |
+| `--output PATH` | Write the result, or the committed table, to PATH as CSV. |
 
-The path may be `-` for stdin; see the dispatch section for the two conditions that come with it.
+`xql sp <list-url>` takes the same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header` and `--output`, plus `--all-fields` to include hidden and system columns in `SELECT *` and `--describe`.
 
-`xql sp <list-url>` adds `--all-fields` (include hidden/system columns in `SELECT *` and `--describe`). Same `--exec`, `--describe`, `--commit`, `--confirm-destructive`, `--mode`, `--json`, `--no-output-header`, `--output` semantics as `csv`.
+`xql xinglet xinglet://<uuid>` takes `--exec`, `--describe`, `--mode`, `--json`, `--no-output-header` and `--output`, and reads its token from `XINGLET_TOKEN`.
 
-`xql xinglet xinglet://<uuid>` accepts `--exec`, `--describe`, `--mode`, `--json`, `--no-output-header`, `--output`. `XINGLET_TOKEN` must be set in the environment. No write flags — the backend is read-only.
+## CSV types
 
-## REPL commands (plain words, no leading `\`)
+xql infers `int`, `float`, `bool`, `date` or `string` per column from a sample, and the type decides how comparisons, sorting and arithmetic behave: `Priority > 2` is numeric only if `Priority` inferred as a number. Run `--describe` before relying on a comparison, and pin a column with `--type` when inference picked wrong. A date column of `03/04/2024` infers as `string`, and so do leading-zero codes and IDs too long for a float.
 
-Once inside the REPL, in addition to SQL statements:
-
-- `help` or `?` — command help
-- `describe` — column schema with inferred types; `describe all` on `sp` includes hidden columns
-- `refresh` — re-read the source (useful after external edits)
-- `mode <table|tsv|csv|json>` — set output format
-- `headers on|off` — toggle the header row
-- `output 'PATH'` — sticky redirect of SELECT results to PATH as CSV; bare `output` clears it
-- `once 'PATH'` — redirect only the next statement
-- `set all-fields on|off` (sp only) — include hidden columns in `SELECT *`; bare `set` lists current state
-- `quit` or `exit` — leave
-
-## CSV type inference — the gotchas that bite
-
-xql samples the first 1024 rows of a CSV and infers `int`, `float`, `bool`, `date`, or `string` per column. The inferred type drives comparison behavior, so `Priority > 2` is a numeric compare, not a lexical one.
-
-Three inference quirks worth knowing:
-
-- **Leading-zero values stay `string`.** `"07030"`, `"007"`, `"-01"` are almost always identifiers, not numbers. Override with `--type Code=int` if the column really is numeric.
-- **`NaN` and `Inf` demote a column to `string`.** Excel's `#DIV/0!` cells leak through Go's float parser, and NaN breaks SQL equality. If they appear anywhere in the sample, the column falls back to `string`.
-- **Excel scientific notation stays `float`.** A column of `1.23E+12` will not round-trip back to the original integer text. Pin with `--type ID=string` to preserve literals.
-
-Run `--describe` (or `describe` in the REPL) before writing anything to confirm what xql thinks each column is.
+The type does not change what is written. Cells a statement does not assign keep their source text in the committed file and in `SELECT` output, so an `UPDATE` that sets one column leaves every other cell as it was. A cell the column's type cannot parse reads as `NULL` in queries and is still written back unchanged.
 
 ## SharePoint specifics
 
-The SharePoint backend translates `WHERE` predicates to OData `$filter` and runs them server-side; `ORDER BY`, `LIMIT`, `OFFSET`, and `DISTINCT` apply client-side after the filtered fetch. This means huge lists filter fast but sort/paginate over the whole filtered set.
+`WHERE` translates to OData `$filter` and runs server-side; `ORDER BY`, `LIMIT`, `OFFSET` and `DISTINCT` apply client-side to the filtered set. `LIKE` maps to `startswith`, `endswith` or `contains` by where the `%` sits, and a mid-pattern `%`, a `_` wildcard or an escape is rejected because OData has no equivalent. `ILIKE` lowercases both sides with `tolower()`. `IN` becomes an OR'd equality chain and `BETWEEN` a `ge`/`le` pair.
 
-Predicate translation:
+Every column has an internal name (what Graph uses, often `field_5`) and a display name (what the SharePoint UI shows), and either resolves. `describe` prints both when they differ, and two columns sharing a display name raise an ambiguous-column error that lists the internal names.
 
-- `LIKE 'foo%'` → `startswith`
-- `LIKE '%foo'` → `endswith`
-- `LIKE '%foo%'` → `contains`
-- Mid-pattern `%`, single-char `_` wildcards, and backslash escapes are rejected with a clear error — OData has no server-side equivalent.
-- `ILIKE` wraps the column reference in `tolower()` and lowercases the literal.
-- `IN (a, b, c)` → an OR'd equality chain.
-- `BETWEEN a AND b` → `ge a and le b`.
-- `IS NULL` / `IS NOT NULL` → `eq null` / `ne null`.
+Writes validate against the list schema before any Graph call. Person, Lookup, Hyperlink and Calculated columns are rejected on write. A Lookup field reads as its numeric ID, and that ID is what to write.
 
-Column identity is dual: every column has both an **internal name** (what Graph uses, often `field_5`) and a **display name** (what the SharePoint UI shows). Either resolves. `describe` prints both when they differ. Two columns sharing a display name produce an ambiguous-column error listing the internal names.
-
-Writes validate against the list's schema before any Graph round-trip. Person, Lookup, Hyperlink, and Calculated columns are all rejected on write with a clear message. Lookup fields on read return the numeric ID; write with that numeric ID, not the display text.
-
-Auth is device-code OAuth. First run prints a short code + URL; a refresh token is cached at `~/.config/excelano/sp-token.json`, one file shared with the xfiles tools, so a sign-in done with any of them covers `xql sp` too.
-
-**Pre-flight:** `xql auth --json` reports that shared session — `signed_in`, `account`, `tenant`, `token_expires`, `scopes` — and exits 0 either way, without starting a sign-in. Run it before a batch of `xql sp` calls when you cannot be sure the machine has been signed in, and branch on `signed_in` rather than on a failed query. `signed_in: false` means ask the user to run `xql sp <list-url>` (or any xfiles tool) once from their own terminal.
+Sign-in is device-code OAuth, with the token cached in `~/.config/excelano/sp-token.json`, shared with the xfiles tools. `xql auth --json` reports `signed_in`, `account`, `tenant`, `token_expires` and `scopes` without starting a sign-in and exits 0 either way. Run it before a batch of `xql sp` calls on a machine you are unsure of, and branch on `signed_in`. If it is false, ask the user to run `xql sp <list-url>` once from their own terminal.
 
 ## Recipes
 
-### 1. Case-insensitive dedup profile of a CSV
-
-The canonical use for the scalar functions. Given an application inventory that has `CoStar`, `Costar`, and `costar` as three different values in `application_name`, collapse them and count the duplicates:
+### Case-insensitive duplicates in a CSV
 
 ```sh
 xql apps.csv --exec "SELECT LOWER(application_name) AS canonical, COUNT(*) AS n GROUP BY LOWER(application_name) HAVING COUNT(*) > 1 ORDER BY n DESC"
 ```
 
-Note the `HAVING COUNT(*) > 1`, not `HAVING n > 1` — xql's `HAVING` clause resolves against source columns and aggregates, not `SELECT`-list aliases. `ORDER BY n DESC` on the next line does resolve against the alias, matching standard SQL.
+Add `--output dupes.csv` to capture the result as CSV.
 
-Output is TSV when piped, table when interactive. To capture the output to a file:
-
-```sh
-xql apps.csv --exec "..." --mode csv --output dupes.csv
-```
-
-### 2. Count by month, and where the date column isn't one
-
-`YEAR`, `MONTH`, and `DAY` turn a date column into something groupable:
+### Count by month, and when the date column is not one
 
 ```sh
 xql staff.csv --exec "SELECT YEAR(hired) AS y, MONTH(hired) AS m, COUNT(*) AS n GROUP BY YEAR(hired), MONTH(hired) ORDER BY y, m"
 ```
 
-This only works if the column actually inferred as `date`, which requires every non-empty value to be ISO. Check with `--describe` first. A column of `03/04/2024` infers as `string`, and `YEAR` on it returns `NULL` for every row rather than guessing whether that is March or April — xql has no more appetite for that guess than xled does.
-
-The fix is to normalize upstream in xled and query the result, which is the family's intended shape for a two-step job:
+This needs `hired` to infer as `date`, which needs ISO values. On a column of `03/04/2024`, `YEAR` returns `NULL` for every row rather than guess the day order. Normalize it in xled first, then query the result:
 
 ```sh
 xled '[hired] = date([hired], "DD/MM/YYYY")' staff.csv > staff-iso.csv
 xql staff-iso.csv --exec "SELECT YEAR(hired) AS y, COUNT(*) AS n GROUP BY YEAR(hired)"
 ```
 
-### 3. Bulk-close old SharePoint list items
+### Bulk-close old SharePoint list items
 
-Preview first (no `--commit`), then rerun with the flag once the sample looks right:
+Preview, read the sample, then rerun with `--commit`:
 
 ```sh
 xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks \
   --exec "UPDATE SET Status = 'Closed' WHERE Modified < '2024-01-01' AND Status != 'Closed'"
 ```
 
-The preview prints the affected count and a sample. Rerun with `--commit` appended to apply. In an interactive REPL, use the trailing `!` shortcut instead:
+### Export a filtered list
 
-```sql
-xql> UPDATE SET Status = 'Closed' WHERE Modified < '2024-01-01' AND Status != 'Closed' !
-```
-
-### 4. Schema-first exploration
-
-Before writing anything, dump the schema so the query references real column names and types:
-
-```sh
-xql --describe apps.csv
-xql sp https://contoso.sharepoint.com/sites/team/Lists/Tasks --describe --all-fields
-```
-
-`--all-fields` on `sp` includes hidden/system columns (Created, Modified, Author, etc.) that are hidden by default to match what the SharePoint UI shows.
-
-### 5. Redirect large SELECT to a file
-
-`--output` writes SELECT results as CSV regardless of the terminal `--mode`:
+`--output` writes CSV whatever the terminal `--mode`:
 
 ```sh
 xql sp https://contoso.sharepoint.com/sites/team/Lists/Big \
-  --exec "SELECT * WHERE Modified >= '2025-01-01'" \
-  --output recent.csv
+  --exec "SELECT * WHERE Modified >= '2025-01-01'" --output recent.csv
 ```
 
-## Error patterns worth recognizing
+## Errors to recognize
 
-- `unknown function FOO` — mistyped scalar, or a capability that lives in a sibling tool. The message says which: text rewriting (`REPLACE`) routes to xled, reshaping (`PIVOT`, `UNPIVOT`, `SPLIT_PART`) to xshape, and xql's own not-yet functions (`LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, `ROUND`) name the xled command that computes the column so it can be queried here. A bare "unknown function" with no pointer is a plain typo.
-- `ambiguous column: X (internal names: ...)` — two SharePoint columns share a display name. Reference the internal name to disambiguate.
-- `... is not supported by SharePoint: OData $filter has no equivalent for arbitrary scalar functions. Rewrite by using the column directly` — you tried `WHERE LOWER(col) = 'x'` against `sp`. Use `WHERE col ILIKE 'x'` instead.
-- `LIKE pattern has no OData equivalent` — mid-pattern `%` or `_` against `sp`. Rewrite as `startswith`/`endswith`/`contains`-shaped, or fetch the column and filter client-side.
-- `--exec write requires --commit` — a write in one-shot mode without the flag. Preview shipped; add `--commit` to apply.
-- `no cached token, and no terminal is attached to complete device-code sign-in` — you are the first caller on this machine and sign-in needs a human. It fails immediately rather than printing a code and blocking, which is the right outcome for you but means you cannot fix it yourself: ask the user to run `xql sp <list-url>` once from their own terminal to cache a token, then re-run. Do not retry, and do not try to script the browser flow. `xql auth` would have told you this before the attempt.
+- `unknown function FOO` is a mistyped scalar or a capability that lives in a sibling tool, and the message names which: text rewriting routes to xled, reshaping to xshape, and xql's missing functions name the xled command that computes the column. A bare "unknown function" with no pointer is a typo.
+- `ambiguous column: X (internal names: ...)` means two SharePoint columns share a display name. Use the internal name.
+- `... is not supported by SharePoint: OData $filter has no equivalent ...` comes from a scalar function in `WHERE` against `sp`. Write `WHERE col ILIKE 'x'` instead of `WHERE LOWER(col) = 'x'`.
+- `LIKE pattern has no OData equivalent` is a mid-pattern `%` or `_` against `sp`. Reshape the pattern, or fetch the column and filter afterwards.
+- `no cached token, and no terminal is attached to complete device-code sign-in` means sign-in needs a human. Ask the user to run `xql sp <list-url>` once from their own terminal, then rerun. Do not retry or script the browser flow.
 
 ## Not this skill's job
 
-- Installing xql — see the README's install section (Debian/Ubuntu apt, Homebrew, curl one-liner, or `go install`).
-- Building or contributing to xql — this skill is for using the binary.
-- Explaining OAuth device-code flow — the first-run prompt is self-explanatory to the human who has to complete it. When there is no human (see the error patterns above), xql says so and stops.
+Installing xql is in the README's install section, and building or contributing to it is outside this skill, which covers using the binary.
