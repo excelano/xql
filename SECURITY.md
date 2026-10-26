@@ -30,7 +30,6 @@ xql stores REPL command history in `~/.config/xql/`, one file per backend, with 
 
 Every GitHub release includes a `checksums.txt` file listing SHA-256 hashes of all binary archives. Verify any download before running it:
 
-    sha256sum xql_1.0.0_linux_amd64.tar.gz
-    # compare against the value in checksums.txt
+    sha256sum -c checksums.txt --ignore-missing
 
-Release artifacts are built by GitHub Actions from a tagged commit using the goreleaser configuration in this repo. The workflow and build configuration are public and auditable.
+Release artifacts are built by `build-release`, the release program in excelano/shipping, from a tagged commit using the goreleaser configuration in this repository (`.goreleaser.yml`). That build configuration is public and auditable.

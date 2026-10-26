@@ -1,5 +1,5 @@
-# goreleaser configuration. Triggered by .github/workflows/release.yml on
-# every "v*" tag push. To test locally (optional):
+# goreleaser configuration, run by build-release (excelano/shipping) from a
+# tagged commit. To test locally (optional):
 #   goreleaser release --snapshot --clean
 # Snapshots produce binaries in ./dist/ without touching GitHub.
 

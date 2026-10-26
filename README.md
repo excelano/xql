@@ -32,7 +32,7 @@ Updated 8 of 8 rows. Wrote tasks.csv.
 
 Tabular data lives in many places — CSVs on disk, SharePoint Lists in M365 tenants, Excel exports, database tables. Editing them in bulk is awkward. Spreadsheet apps choke past a few hundred thousand rows, point-and-click web UIs are not scriptable, and writing a one-off script for each transform is overkill. `xql` is the smallest tool that lets you write one SQL statement, see what it would change, and commit if it is right — against whichever backend matches the data you have in front of you.
 
-v1.0 shipped the CSV backend, replacing a standalone tool called `sqlcsv`. v1.1 adds the SharePoint backend, replacing a standalone tool called `spsql`. Both predecessors are retired and their repositories are closed; `xql` is the only supported path. The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
+The grammar is identical across backends — code written against `xql csv` runs against `xql sp` once you point it at a list.
 
 ## The tabular family
 
@@ -44,7 +44,7 @@ They compose over plain CSV, so a job that needs two of them is a pipeline, not 
 
 ## Install
 
-Every install line below ends with `xql --install-skill`. That installs the [Claude Code skill](#claude-code-skill) alongside the binary, which is the one step people reliably skipped when it lived further down the page. Drop it if you do not use Claude Code — the CLI itself does not need it.
+Every install line below ends with `xql --install-skill`. That installs the [Claude Code skill](#claude-code-skill) alongside the binary. Drop it if you do not use Claude Code — the CLI itself does not need it.
 
 ### Debian and Ubuntu
 
@@ -88,7 +88,7 @@ Or download the `windows_amd64` zip from the [releases page](https://github.com/
 
 ### Go
 
-From source (Go 1.24 or later):
+From source (`go.mod` names the Go toolchain it needs):
 
 ```
 go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
@@ -96,17 +96,15 @@ go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
 
 ### Upgrade
 
-Re-run the installer. If `xql` is already on your `PATH`, it upgrades the existing copy in place rather than scattering a duplicate into the default directory. If you explicitly set `XQL_INSTALL_DIR` to a different directory than the existing copy, the installer warns and leaves both in place — `PATH` order then decides which version runs.
-
-### Uninstall
+Update it the way you installed it: `apt upgrade`, `brew upgrade`, or the `go install` line again.
 
 ## Backends
 
-| Name | Extensions | Status |
-|------|------------|--------|
-| `csv` | `.csv`, `.tsv` | available |
-| `sp`  | (never inferred — URL + auth required) | available |
-| `xinglet` | (never inferred — `xinglet://` URL + Bearer token required) | available (read-only) |
+| Name | Extensions |
+|------|------------|
+| `csv` | `.csv`, `.tsv` |
+| `sp`  | (never inferred — URL + auth required) |
+| `xinglet` | (never inferred — `xinglet://` URL + Bearer token required; read-only) |
 
 `xql --help` lists registered backends. `xql <backend> --help` shows backend-specific flags.
 
@@ -129,7 +127,7 @@ xql <path>           # equivalent when the extension is .csv or .tsv
 
 Opens a prompt bound to the file. Arrow keys recall history, Ctrl-R searches it, Ctrl-D exits. History persists at `~/.config/xql/history-csv` across sessions (one history file per backend).
 
-The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types (`describe all` on `xql sp` includes the SharePoint system columns hidden by default), `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL. Output controls follow sqlite shapes (without the leading dot): `mode <table|tsv|csv|json>` sets how results render to stdout, `headers on|off` toggles the column-name row, `output 'PATH'` redirects subsequent SELECT results to PATH as CSV (sticky — type `output` with no argument to clear), and `once 'PATH'` redirects only the next statement. Runtime toggles use `set <name> on|off`; today `set all-fields on` includes hidden SharePoint columns in `SELECT *`, and bare `set` lists the current state.
+The REPL accepts SQL statements one per line plus a few meta-commands as plain words (case-insensitive): `help` or `?` shows command help, `describe` prints the column schema with inferred types (`describe all` on `xql sp` includes the SharePoint system columns hidden by default), `refresh` re-reads the file from disk, and `quit` or `exit` leaves the REPL. Output controls follow sqlite shapes (without the leading dot): `mode <table|tsv|csv|json>` sets how results render to stdout, `headers on|off` toggles the column-name row, `output 'PATH'` redirects subsequent SELECT results to PATH as CSV (sticky — type `output` with no argument to clear), and `once 'PATH'` redirects only the next statement. Runtime toggles use `set <name> on|off`; `set all-fields on` includes hidden SharePoint columns in `SELECT *`, and bare `set` lists the current state.
 
 Writes (INSERT, UPDATE, DELETE) preview by default. `xql` prints the affected count, a sample of the rows that match, and then prompts `Apply? [y/N]:`. Anything but `y` cancels. Append `!` to skip the prompt and commit immediately:
 
@@ -256,7 +254,7 @@ The skill lets any Claude Code session use `xql` correctly without hallucinating
 
 ## Security
 
-`xql csv` runs locally and only touches files your OS user already has access to; it makes no network calls. `xql sp` calls Microsoft Graph over HTTPS using a device-code OAuth flow and caches the resulting refresh token at `~/.config/excelano/sp-token.json`, a file shared with the xfiles tools and encrypted on Windows. `xql xinglet` calls the xinglist export endpoint over HTTPS with `Authorization: Bearer $XINGLET_TOKEN`; the token is never persisted by `xql` (it lives only in your shell environment for the lifetime of the process). See [SECURITY.md](SECURITY.md) for the full policy and the vulnerability reporting process. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
+`xql csv` runs locally and makes no network calls; `xql sp` and `xql xinglet` call their services over HTTPS. [SECURITY.md](SECURITY.md) says what each backend sends, where it caches a token and how that cache is protected, and how to report a vulnerability. If your organization restricts user consent, [ADMINS.md](ADMINS.md) has everything your IT department needs to review and approve the SharePoint backend.
 
 ## License
 
