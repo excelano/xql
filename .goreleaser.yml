@@ -74,14 +74,6 @@ release:
   draft: false
   prerelease: auto
 
-changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - '^(build|chore|ci|deps|docs|refactor|style|test)(\(.*?\))?!?:'
-      - "^Merge "
-
 brews:
   - name: xql
     repository:
