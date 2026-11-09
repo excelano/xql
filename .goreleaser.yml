@@ -79,10 +79,8 @@ changelog:
   use: github
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - "Merge pull request"
+      - '^(build|chore|ci|deps|docs|refactor|style|test)(\(.*?\))?!?:'
+      - "^Merge "
 
 brews:
   - name: xql
