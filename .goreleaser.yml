@@ -1,3 +1,6 @@
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+#
 # goreleaser configuration, run by build-release (excelano/shipping) from a
 # tagged commit. To test locally (optional):
 #   goreleaser release --snapshot --clean
@@ -73,19 +76,3 @@ checksum:
 release:
   draft: false
   prerelease: auto
-
-brews:
-  - name: xql
-    repository:
-      owner: excelano
-      name: homebrew-tap
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
-    homepage: "https://excelano.com/xql/"
-    description: "Run real SQL against SharePoint Lists and CSV files"
-    license: "MIT"
-    install: |
-      bin.install "xql"
-    test: |
-      system "#{bin}/xql", "--version"

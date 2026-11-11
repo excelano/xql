@@ -35,7 +35,7 @@ The recipes assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `
 
 They also assume that a write leaves the rows and cells it does not change as they were read. If `--describe` reports a column of 20-digit IDs as `float`, the installed copy predates that: pass `--type Col=string` for every column you are not assigning, or upgrade.
 
-Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (Homebrew), `winget upgrade Excelano.xql` (Windows), or the `go install` line in the README.
+Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `winget upgrade Excelano.xql` (Windows), or the `go install` line in the README.
 
 ## Invocation
 

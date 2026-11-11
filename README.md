@@ -60,21 +60,6 @@ Then install it, so `apt upgrade` keeps it current:
 sudo apt install xql && xql --install-skill
 ```
 
-### Homebrew
-
-On macOS or Linux, tap and trust the repository once — Homebrew gates third-party taps behind explicit trust (one-time setup):
-
-```sh
-brew tap excelano/tap
-brew trust excelano/tap
-```
-
-Then install it, so `brew upgrade` keeps it current:
-
-```sh
-brew install xql && xql --install-skill
-```
-
 ### Windows
 
 With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current:
@@ -96,7 +81,7 @@ go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
 
 ### Upgrade
 
-Update it the way you installed it: `apt upgrade`, `brew upgrade`, `winget upgrade`, or the `go install` line again.
+Update it the way you installed it: `apt upgrade`, `winget upgrade`, or the `go install` line again.
 
 ## Backends
 
@@ -248,7 +233,7 @@ xql --install-skill
 
 That writes `~/.claude/skills/xql/` and stamps in the skill's revision, which `xql -V` also prints, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `xql --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
-The skill is compiled into the binary, so this works the same however you installed xql — apt, Homebrew, `go install`, or a build from source.
+The skill is compiled into the binary, so this works the same however you installed xql — apt, `go install`, or a build from source.
 
 The skill lets any Claude Code session use `xql` correctly without hallucinating its SQL subset, splits the SharePoint and local-CSV lanes so the advice to switch to a full SQL engine lands only where one can read the data, and points at xfiles for library *files* rather than list rows.
 
