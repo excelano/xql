@@ -12,7 +12,7 @@ The latest release receives security fixes. Older versions are not supported. A 
 
 ## What xql can access
 
-xql is a CLI that runs locally on your machine. Each backend is described below; run `xql --help` to see which ones your build offers.
+xql is a CLI that runs locally on your machine. Each backend is described below; run `xql --help` to see which ones your build offers. Apart from the backends, `--install-skill` writes xql's Claude Code skill to `~/.claude/skills/xql/`, and `--uninstall-skill` removes that directory.
 
 The CSV backend (`xql csv`) reads the file you point it at, holds it in memory for the duration of the session, and writes the modified file back when you commit a write statement. It makes no network calls, has no auth layer, and can only read and write files your operating-system user already has access to.
 
