@@ -36,7 +36,7 @@ The grammar is identical across backends — code written against `xql csv` runs
 
 ## The tabular family
 
-`xql` is one of four small tools split by **what changes**. [xray](https://github.com/excelano/xray) observes and changes nothing — it profiles a delimited file's shape, types, and hazards before you touch it. [xled](https://github.com/excelano/xled) edits cell *values*: sed's `s///` and a per-row compute layer, applied over Excel-style ranges, never altering the table's shape. [xshape](https://github.com/excelano/xshape) changes the grid's *geometry* — pivot, unpivot, split, explode, merge. `xql` queries the *row set*: filter, aggregate, group, sort, and write back through DML.
+`xql` belongs to a family of small tools split by **what changes**. [xray](https://github.com/excelano/xray) observes and changes nothing — it profiles a delimited file's shape, types, and hazards before you touch it. [xled](https://github.com/excelano/xled) edits cell *values*: sed's `s///` and a per-row compute layer, applied over Excel-style ranges, never altering the table's shape. [xshape](https://github.com/excelano/xshape) changes the grid's *geometry* — pivot, unpivot, split, explode, merge. `xql` queries the *row set*: filter, aggregate, group, sort, and write back through DML. A join needs a second table and belongs to a SQL engine such as DuckDB, and converting between office formats is [this2that](https://github.com/excelano/this2that)'s.
 
 The split decides where a job goes. Rewriting the text inside cells by pattern is xled's, even when a `WHERE` would have picked the same rows. Turning one column into several is xshape's. Anything that answers a question *about* the rows — how many, which ones, grouped by what — is `xql`'s. When you land in the wrong tool, the error says which one has the capability rather than just refusing; that routing runs in both directions across the family.
 
@@ -44,7 +44,7 @@ They compose over plain CSV, so a job that needs two of them is a pipeline, not 
 
 ## Install
 
-Every install line below ends with `xql --install-skill`. That installs the [Claude Code skill](#claude-code-skill) alongside the binary. Drop it if you do not use Claude Code — the CLI itself does not need it.
+Every install line below ends with `xql --install-skill`. That installs the [Claude Code skill](#use-it-from-claude-code) alongside the binary. Drop it if you do not use Claude Code — the CLI itself does not need it.
 
 ### Debian and Ubuntu
 
@@ -96,7 +96,7 @@ go install github.com/excelano/xql/cmd/xql@latest && xql --install-skill
 
 ### Upgrade
 
-Update it the way you installed it: `apt upgrade`, `brew upgrade`, or the `go install` line again.
+Update it the way you installed it: `apt upgrade`, `brew upgrade`, `winget upgrade`, or the `go install` line again.
 
 ## Backends
 
@@ -238,7 +238,7 @@ Column names are case-insensitive on input — `select * where firstname = 'John
 
 On the SharePoint backend, columns can be referenced by either their internal name (what Graph uses for `$filter` and PATCH) or their display name (what the SharePoint UI shows). `describe` lists both side by side when they differ. CSV imports leave you with internal names like `field_5` and display names taken from the CSV header — `select vendor` and `select field_5` resolve to the same column. Use `describe all` to include SharePoint's system/hidden columns, and `set all-fields on` to include them in `SELECT *` at runtime (the launch flag `--all-fields` does the same).
 
-## Claude Code skill
+## Use it from Claude Code
 
 An official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill ships in [`skills/xql/`](skills/xql/). The binary installs it:
 

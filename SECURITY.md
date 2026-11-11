@@ -8,7 +8,7 @@ Please do not open public issues for security problems.
 
 ## Supported versions
 
-The latest release receives security fixes. Older versions are not supported.
+The latest release receives security fixes. Older versions are not supported. A fix ships in a new release; update the way you installed.
 
 ## What xql can access
 
@@ -16,7 +16,7 @@ xql is a CLI that runs locally on your machine. Each backend is described below;
 
 The CSV backend (`xql csv`) reads the file you point it at, holds it in memory for the duration of the session, and writes the modified file back when you commit a write statement. It makes no network calls, has no auth layer, and can only read and write files your operating-system user already has access to.
 
-The SharePoint backend (`xql sp`) calls Microsoft Graph over HTTPS to read and write items in a single bound SharePoint list. Authentication is delegated device-code OAuth against your Microsoft Entra ID account; the scope requested is `Sites.ReadWrite.All`. xql cannot access any data your account cannot already access in SharePoint Online. No other Graph endpoints are touched.
+The SharePoint backend (`xql sp`) calls Microsoft Graph over HTTPS to read and write items in a single bound SharePoint list. Authentication is delegated device-code OAuth against your Microsoft Entra ID account; the Graph permission requested is `Sites.ReadWrite.All`, alongside the standard OpenID Connect sign-in scopes. xql cannot access any data your account cannot already access in SharePoint Online. No other Graph endpoints are touched.
 
 The xinglet backend (`xql xinglet`) fetches a snapshot of one xinglist over HTTPS from the host named by `XINGLET_BASE_URL` (by default `https://xinglet.com`), authenticating with the `XINGLET_TOKEN` environment variable as an `Authorization: Bearer` header. The token is sent only to the URL named on the command line, and xql never stores, logs, or persists it — it lives in your shell environment for the lifetime of the process. The backend is read-only: `INSERT`, `UPDATE`, and `DELETE` are rejected before parsing, because the server exposes no write endpoint over Bearer auth.
 

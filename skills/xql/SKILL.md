@@ -23,7 +23,7 @@ Reach for xql when the user has one CSV, one TSV, one SharePoint list or one xin
 
 **Local CSV/TSV (`xql csv`)** is a convenience: a single-table SQL subset with careful CSV handling, enough for most one-file questions. When a question needs a JOIN, a subquery, a CTE, `UNION`, a window function or a second file, switch to a full engine. Check what is installed (`command -v duckdb sqlite3 csvsql`) rather than assuming one: DuckDB reads CSV directly, `sqlite3` takes it through `.import --csv`, and `csvsql --query` (csvkit) runs SQL over CSV files with no setup.
 
-## The neighbours
+## The neighbors
 
 On a **local delimited file**, xql is the last step, not the first: [xray](https://github.com/excelano/xray) profiles it read-only and names the hazards, [xled](https://github.com/excelano/xled) repairs cell values (currency stored as text, stripped leading zeros, a buried header), and [xshape](https://github.com/excelano/xshape) fixes the geometry (unpivot a wide export before you can group by year).
 
@@ -35,7 +35,7 @@ The recipes assume an xql with the scalar functions `LOWER`/`UPPER`/`TRIM` and `
 
 They also assume that a write leaves the rows and cells it does not change as they were read. If `--describe` reports a column of 20-digit IDs as `float`, the installed copy predates that: pass `--type Col=string` for every column you are not assigning, or upgrade.
 
-Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (macOS), or the install one-liner in the README.
+Upgrade with `sudo apt install --only-upgrade xql` (Debian/Ubuntu), `brew upgrade xql` (Homebrew), `winget upgrade Excelano.xql` (Windows), or the `go install` line in the README.
 
 ## Invocation
 
@@ -101,7 +101,7 @@ A committed write rewrites the bound CSV, or PATCHes each affected SharePoint it
 
 xql infers `int`, `float`, `bool`, `date` or `string` per column from a sample, and the type decides how comparisons, sorting and arithmetic behave: `Priority > 2` is numeric only if `Priority` inferred as a number. Run `--describe` before relying on a comparison, and pin a column with `--type` when inference picked wrong. A date column of `03/04/2024` infers as `string`, and so do leading-zero codes and IDs too long for a float.
 
-The type does not change what is written. A committed write rewrites only the rows it changes; every other row is written back as its original text, and the file keeps its BOM and line endings. In a changed row, cells the statement does not assign keep their source text, so an `UPDATE` that sets one column leaves every other cell as it was. A cell the column's type cannot parse reads as `NULL` in queries and is still written back unchanged.
+The type does not change what is written: a cell no statement assigns keeps its source text. The README's CSV dialect and type-inference sections have the write-back rules.
 
 ## SharePoint specifics
 

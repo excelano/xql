@@ -22,9 +22,9 @@ Excelano LLC is a Microsoft-verified publisher, so the consent screen and the en
 
 ## What the delegated permission means
 
-The permission is delegated, not application. That distinction is the whole risk profile. A delegated permission only ever acts on behalf of the user who signed in, and only for the duration of their token. xql cannot read or write any site, list, or item that the user could not already reach themselves, and it has no standalone or unattended access — nothing happens unless that specific person has run the tool and signed in. There is no client secret embedded in the tool and no app-only token path, so the registration cannot be used for background data access.
+The permission is delegated, not application, and that sets the risk profile. A delegated permission only ever acts on behalf of the user who signed in, and only for the duration of their token. xql cannot read or write any site, list, or item that the user could not already reach themselves, and it has no standalone or unattended access — nothing happens unless that specific person has run the tool and signed in. There is no client secret embedded in the tool and no app-only token path, so the registration cannot be used for background data access.
 
-`Sites.ReadWrite.All` is the narrowest single Graph scope that allows reading a list's schema and items and committing writes back across the SharePoint sites the user can access. xql requests no other scopes and calls no Graph endpoints beyond the bound list. The CSV backend has no auth layer at all.
+`Sites.ReadWrite.All` is the narrowest single Graph scope that allows reading a list's schema and items and committing writes back across the SharePoint sites the user can access. xql requests no other Graph permission and calls no Graph endpoints beyond the bound list; the sign-in itself carries the standard OpenID Connect scopes (`openid`, `profile`, `offline_access`) that every Microsoft sign-in requests. The CSV backend has no auth layer at all.
 
 ## Whether you need to do anything
 

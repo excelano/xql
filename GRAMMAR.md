@@ -15,7 +15,7 @@ statement     := select_stmt | update_stmt | delete_stmt | insert_stmt
 
 select_stmt   := "SELECT" "DISTINCT"? projection_list
                  ( "WHERE" predicate )?
-                 ( "GROUP" "BY" column ( "," column )* )?
+                 ( "GROUP" "BY" expr ( "," expr )* )?
                  ( "HAVING" predicate )?
                  ( "ORDER" "BY" sort_key ( "," sort_key )* )?
                  ( "LIMIT" integer )?
@@ -84,7 +84,7 @@ Scalar functions cover two surfaces. **String normalization**: `LOWER(s)`, `UPPE
 
 The date accessors accept a `date` column, or a `string` whose value parses as one of the ISO forms below. A string cell that is not a date evaluates to `NULL` for that row rather than failing the query — SQL already has a value for "no answer here", and one bad cell should not abort a scan over the rest. An argument statically typed `int`, `float`, or `bool` is rejected at plan time instead, since it can only ever be wrong; the error names the `--type` override in case inference simply picked wrong. There is deliberately no serial-number interpretation of a numeric column.
 
-Unknown names parse cleanly and produce an `unknown function` error at plan time, so mistyped `LOWERR(x)` fails with a clear message rather than a cryptic parse error. Where the name makes the intent obvious, the error also says where the capability lives: text rewriting (`REPLACE`, `REGEXP_REPLACE`) is xled's, reshaping (`PIVOT`, `UNPIVOT`, `SPLIT_PART`) is xshape's, and the functions xql has not built yet (`LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, `ROUND`) name the xled command that computes the column so it can be queried here.
+Unknown names parse cleanly and produce an `unknown function` error at plan time, so mistyped `LOWERR(x)` fails with a clear message rather than a cryptic parse error. Where the name makes the intent obvious, the error also says where the capability lives: text rewriting (`REPLACE`, `REGEXP_REPLACE`) is xled's, reshaping (`PIVOT`, `UNPIVOT`, `SPLIT_PART`) is xshape's, and the functions xql lacks (`LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, `ROUND`) name the xled command that computes the column so it can be queried here.
 
 ## Predicates
 
@@ -210,8 +210,8 @@ SELECT Title WHERE MONTH(Modified) = 12
 
 ## Out of scope
 
-Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join externally — for `xql csv` by loading the redirected files in a follow-up session, for `xql sp` by piping the CSVs through `sqlite3`, `xql csv`, or `jq`.
+Permanently out of scope: `JOIN` of any form. `xql` binds to a single table per session by design. To combine data across tables, run a `SELECT` against each, redirect to CSV, and join the files in a SQL engine such as DuckDB.
 
 Not implemented: `ORDER BY` with expressions, multi-column `COUNT(DISTINCT a, b)`, `DISTINCT` in aggregates other than `COUNT`, and scalar functions beyond the string-normalization and calendar-component sets — `LENGTH`, `SUBSTRING`, `LEFT`, `RIGHT`, and `ROUND` are not available. These are absences rather than refusals, and each one's error names the xled command that computes the column so the result can be queried here.
 
-No current plan: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions. None are technically impossible, but each adds parser complexity for a use case that has not surfaced yet.
+Also not supported: subqueries, `UNION` / `INTERSECT` / `EXCEPT`, and common table expressions.
